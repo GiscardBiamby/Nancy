@@ -84,6 +84,10 @@
     <Reference Include="CsQuery">
       <HintPath>..\packages\CsQuery.1.0.1.30111\lib\net40\CsQuery.dll</HintPath>
     </Reference>
+    <Reference Include="Nancy.Authentication.Forms, Version=0.12.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\Nancy.Authentication.Forms\bin\Debug\Nancy.Authentication.Forms.dll</HintPath>
+    </Reference>
     <Reference Include="System">
     </Reference>
     <Reference Include="System.Core">
@@ -130,10 +134,6 @@
     <Compile Include="AssertExtensions.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Nancy.Authentication.Forms\Nancy.Authentication.Forms.csproj">
-      <Project>{E8B18958-7C8A-4FBA-AF00-3041C34A20CE}</Project>
-      <Name>Nancy.Authentication.Forms</Name>
-    </ProjectReference>
     <ProjectReference Include="..\Nancy\Nancy.csproj">
       <Project>{34576216-0DCA-4B0F-A0DC-9075E75A676F}</Project>
       <Name>Nancy</Name>
