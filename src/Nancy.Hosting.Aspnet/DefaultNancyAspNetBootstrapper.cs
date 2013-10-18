@@ -5,8 +5,7 @@ namespace Nancy.Hosting.Aspnet
     using System.Collections.Generic;
 
     using Bootstrapper;
-
-    using TinyIoC;
+    using Nancy.TinyIoc;
 
     /// <summary>
     /// TinyIoC ASP.Net Bootstrapper
@@ -15,9 +14,9 @@ namespace Nancy.Hosting.Aspnet
     public abstract class DefaultNancyAspNetBootstrapper : NancyBootstrapperBase<TinyIoCContainer>
     {
         /// <summary>
-        /// Gets the diagnostics for intialisation
+        /// Gets the diagnostics for initialisation
         /// </summary>
-        /// <returns>IDagnostics implementation</returns>
+        /// <returns>IDiagnostics implementation</returns>
         protected override IDiagnostics GetDiagnostics()
         {
             return this.ApplicationContainer.Resolve<IDiagnostics>();
@@ -45,21 +44,21 @@ namespace Nancy.Hosting.Aspnet
         /// Get all NancyModule implementation instances - should be multi-instance
         /// </summary>
         /// <param name="context">Current request context</param>
-        /// <returns>IEnumerable of NancyModule</returns>
-        public override sealed IEnumerable<NancyModule> GetAllModules(NancyContext context)
+        /// <returns>IEnumerable of INancyModule</returns>
+        public override sealed IEnumerable<INancyModule> GetAllModules(NancyContext context)
         {
-            return this.ApplicationContainer.ResolveAll<NancyModule>(false);
+            return this.ApplicationContainer.ResolveAll<INancyModule>(false);
         }
 
         /// <summary>
-        /// Gets a specific, per-request, module instance from the key
+        /// Retrieves a specific <see cref="INancyModule"/> implementation - should be per-request lifetime
         /// </summary>
-        /// <param name="moduleKey">Module key of the module to retrieve</param>
-        /// <param name="context">Current request context</param>
-        /// <returns>NancyModule instance</returns>
-        public override sealed NancyModule GetModuleByKey(string moduleKey, NancyContext context)
+        /// <param name="moduleType">Module type</param>
+        /// <param name="context">The current context</param>
+        /// <returns>The <see cref="INancyModule"/> instance</returns>
+        public override INancyModule GetModule(System.Type moduleType, NancyContext context)
         {
-            return this.ApplicationContainer.Resolve<NancyModule>(moduleKey);
+            return this.ApplicationContainer.Resolve<INancyModule>(moduleType.FullName);
         }
 
         /// <summary>
@@ -90,15 +89,6 @@ namespace Nancy.Hosting.Aspnet
         protected override sealed INancyEngine GetEngineInternal()
         {
             return this.ApplicationContainer.Resolve<INancyEngine>();
-        }
-
-        /// <summary>
-        /// Get the moduleKey generator
-        /// </summary>
-        /// <returns>IModuleKeyGenerator instance</returns>
-        protected override sealed IModuleKeyGenerator GetModuleKeyGenerator()
-        {
-            return this.ApplicationContainer.Resolve<IModuleKeyGenerator>();
         }
 
         /// <summary>
@@ -157,7 +147,7 @@ namespace Nancy.Hosting.Aspnet
         {
             foreach (var registrationType in moduleRegistrationTypes)
             {
-                container.Register(typeof(NancyModule), registrationType.ModuleType, registrationType.ModuleKey).AsPerRequestSingleton();
+                container.Register(typeof(INancyModule), registrationType.ModuleType, registrationType.ModuleType.FullName).AsPerRequestSingleton();
             }
         }
 

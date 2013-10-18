@@ -15,7 +15,7 @@
         public ModelBindingFixture()
         {
             this.bootstrapper = 
-                new ConfigurableBootstrapper(with => with.Modules(new[] { typeof(ModelBindingModule) }));
+                new ConfigurableBootstrapper(with => with.Modules(new[] { typeof(ModelBindingModule), typeof(MixedSourceModelBindingModule) }));
 
             this.browser = new Browser(bootstrapper);
         }
@@ -33,7 +33,24 @@
             });
 
             // Then
-            Assert.Equal(result.StatusCode, HttpStatusCode.OK);
+            Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        }
+
+        [Fact]
+        public void Should_be_able_to_bind_body_and_other_sources_separately()
+        {
+            // Given
+            const string body = "{ 'key1': 'body' , 'key2': 'value2'}";
+
+            // When
+            var result = this.browser.Put("/foo/param", with =>
+            {
+                with.Body(body);
+                with.Header("content-type", "application/json");
+            });
+
+            // Then
+            Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         }
     }
 
@@ -50,6 +67,27 @@
                     HttpStatusCode.InternalServerError;
             };
         }
+    }
+
+    public class MixedSourceModelBindingModule : NancyModule
+    {
+        public MixedSourceModelBindingModule()
+        {
+            Put["/foo/{key1}"] = _ =>
+            {
+                var bodyModel = this.Bind<MyModel>(new BindingConfig { BodyOnly = true });
+                var paramModel = this.Bind<ParamModel>();
+
+                return (bodyModel.key1 != paramModel.key1) ?
+                    HttpStatusCode.OK :
+                    HttpStatusCode.InternalServerError;
+            };
+        }
+    }
+
+    public class ParamModel
+    {
+        public string key1 { get; set; }
     }
 
     public class MyModel

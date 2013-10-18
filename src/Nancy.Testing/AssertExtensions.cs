@@ -2,7 +2,7 @@ namespace Nancy.Testing
 {
     using System;
     using System.Linq;
-    using System.Threading;
+
     //using Xunit;
 
     /// <summary>
@@ -31,11 +31,31 @@ namespace Nancy.Testing
         }
 
         /// <summary>
+        /// Asserts that an element does not exist
+        /// </summary>
+        public static AndConnector<QueryWrapper> ShouldNotExist(this QueryWrapper query)
+        {
+            Asserts.False(query.Any());
+
+            return new AndConnector<QueryWrapper>(query);
+        }
+
+        /// <summary>
         /// Asserts that an element or element should exist one, and only once
         /// </summary>
         public static AndConnector<NodeWrapper> ShouldExistOnce(this QueryWrapper query)
         {
             return new AndConnector<NodeWrapper>(Asserts.Single(query));
+        }
+
+        /// <summary>
+        /// Asserts that an element or element should exist exactly the specified number of times
+        /// <param name="expectedNumberOfOccurrances">The expected number of times the element should exist</param>
+        /// </summary>
+        public static AndConnector<QueryWrapper> ShouldExistExactly(this QueryWrapper query, int expectedNumberOfOccurrances)
+        {
+            var nodeWrappers = Asserts.Exactly(query, expectedNumberOfOccurrances);
+            return new AndConnector<QueryWrapper>(nodeWrappers as QueryWrapper);
         }
 
         /// <summary>
@@ -79,6 +99,52 @@ namespace Nancy.Testing
             foreach (var node in query)
             {
                 node.ShouldContain(contents, comparisonType);
+            }
+
+            return new AndConnector<QueryWrapper>(query);
+        }
+
+        /// <summary>
+        /// Asserts that an element has a specific attribute
+        /// </summary>
+        public static AndConnector<NodeWrapper> ShouldContainAttribute(this NodeWrapper node, string name)
+        {
+            Asserts.True(node.HasAttribute(name));
+
+            return new AndConnector<NodeWrapper>(node);
+        }
+
+        /// <summary>
+        /// Asserts that an element has a specific attribute with a specified value
+        /// </summary>
+        public static AndConnector<NodeWrapper> ShouldContainAttribute(this NodeWrapper node, string name, string value, StringComparison comparisonType = StringComparison.InvariantCulture)
+        {
+            Asserts.Equal(node.Attributes[name], value, comparisonType);
+
+            return new AndConnector<NodeWrapper>(node);
+        }
+
+        /// <summary>
+        /// Asserts that an element has a specific attribute
+        /// </summary>
+        public static AndConnector<QueryWrapper> ShouldContainAttribute(this QueryWrapper query, string name)
+        {
+            foreach (var node in query)
+            {
+                node.ShouldContainAttribute(name);
+            }
+
+            return new AndConnector<QueryWrapper>(query);
+        }
+
+        /// <summary>
+        /// Asserts that an element has a specific attribute with a specified value
+        /// </summary>
+        public static AndConnector<QueryWrapper> ShouldContainAttribute(this QueryWrapper query, string name, string value, StringComparison comparisonType = StringComparison.InvariantCulture)
+        {
+            foreach (var node in query)
+            {
+                node.ShouldContainAttribute(name, value);
             }
 
             return new AndConnector<QueryWrapper>(query);

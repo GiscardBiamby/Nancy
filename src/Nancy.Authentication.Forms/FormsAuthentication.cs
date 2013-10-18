@@ -58,7 +58,10 @@ namespace Nancy.Authentication.Forms
             currentConfiguration = configuration;
 
             pipelines.BeforeRequest.AddItemToStartOfPipeline(GetLoadAuthenticationHook(configuration));
-            pipelines.AfterRequest.AddItemToEndOfPipeline(GetRedirectToLoginHook(configuration));
+            if (!configuration.DisableRedirect)
+            {
+                pipelines.AfterRequest.AddItemToEndOfPipeline(GetRedirectToLoginHook(configuration));                
+            }
         }
 
         /// <summary>
@@ -70,14 +73,30 @@ namespace Nancy.Authentication.Forms
         /// <param name="cookieExpiry">Optional expiry date for the cookie (for 'Remember me')</param>
         /// <param name="fallbackRedirectUrl">Url to redirect to if none in the querystring</param>
         /// <returns>Nancy response with redirect.</returns>
-        public static Response UserLoggedInRedirectResponse(NancyContext context, Guid userIdentifier, DateTime? cookieExpiry = null, string fallbackRedirectUrl = "/")
+        public static Response UserLoggedInRedirectResponse(NancyContext context, Guid userIdentifier, DateTime? cookieExpiry = null, string fallbackRedirectUrl = null)
         {
             var redirectUrl = fallbackRedirectUrl;
+
+            if (string.IsNullOrEmpty(redirectUrl))
+            {
+                redirectUrl = context.Request.Url.BasePath;
+            }
+
+            if (string.IsNullOrEmpty(redirectUrl))
+            {
+                redirectUrl = "/";
+            }
+
             string redirectQuerystringKey = GetRedirectQuerystringKey(currentConfiguration);
 
             if (context.Request.Query[redirectQuerystringKey].HasValue)
             {
-                redirectUrl = context.Request.Query[redirectQuerystringKey];
+                var queryUrl = (string)context.Request.Query[redirectQuerystringKey];
+
+                if (context.IsLocalUrl(queryUrl))
+                {
+                    redirectUrl = queryUrl;
+                }
             }
 
             var response = context.GetRedirect(redirectUrl);
@@ -157,8 +176,7 @@ namespace Nancy.Authentication.Forms
 
                     if (userGuid != Guid.Empty)
                     {
-
-                      context.CurrentUser = configuration.UserMapper.GetUserFromIdentifier(userGuid, context);
+                        context.CurrentUser = configuration.UserMapper.GetUserFromIdentifier(userGuid, context);
                     }
 
                     return null;
@@ -223,7 +241,17 @@ namespace Nancy.Authentication.Forms
         {
             var cookieContents = EncryptAndSignCookie(userIdentifier.ToString(), configuration);
 
-            var cookie = new NancyCookie(formsAuthenticationCookieName, cookieContents, true) { Expires = cookieExpiry };
+            var cookie = new NancyCookie(formsAuthenticationCookieName, cookieContents, true, configuration.RequiresSSL) { Expires = cookieExpiry };
+
+            if(!string.IsNullOrEmpty(configuration.Domain))
+            {
+                cookie.Domain = configuration.Domain;
+            }
+
+            if(!string.IsNullOrEmpty(configuration.Path))
+            {
+                cookie.Path = configuration.Path;
+            }
 
             return cookie;
         }
@@ -235,7 +263,19 @@ namespace Nancy.Authentication.Forms
         /// <returns>Nancy cookie instance</returns>
         private static INancyCookie BuildLogoutCookie(FormsAuthenticationConfiguration configuration)
         {
-            return new NancyCookie(formsAuthenticationCookieName, String.Empty, true) { Expires = DateTime.Now.AddDays(-1) };
+            var cookie = new NancyCookie(formsAuthenticationCookieName, String.Empty, true, configuration.RequiresSSL) { Expires = DateTime.Now.AddDays(-1) };
+
+            if(!string.IsNullOrEmpty(configuration.Domain))
+            {
+                cookie.Domain = configuration.Domain;
+            }
+
+            if(!string.IsNullOrEmpty(configuration.Path))
+            {
+                cookie.Path = configuration.Path;
+            }
+
+            return cookie;
         }
 
         /// <summary>
@@ -270,7 +310,7 @@ namespace Nancy.Authentication.Forms
         /// <param name="cookieValue">Encrypted and signed cookie value</param>
         /// <param name="configuration">Current configuration</param>
         /// <returns>Decrypted value, or empty on error or if failed validation</returns>
-        private static string DecryptAndValidateAuthenticationCookie(string cookieValue, FormsAuthenticationConfiguration configuration)
+        public static string DecryptAndValidateAuthenticationCookie(string cookieValue, FormsAuthenticationConfiguration configuration)
         {
             // TODO - shouldn't this be automatically decoded by nancy cookie when that change is made?
             var decodedCookie = Helpers.HttpUtility.UrlDecode(cookieValue);
@@ -290,7 +330,7 @@ namespace Nancy.Authentication.Forms
             var decrypted = encryptionProvider.Decrypt(encryptedCookie);
 
             // Only return the decrypted result if the hmac was ok
-            return hmacValid ? decrypted : String.Empty;
+            return hmacValid ? decrypted : string.Empty;
         }
 
         /// <summary>
@@ -314,8 +354,5 @@ namespace Nancy.Authentication.Forms
 
             return redirectQuerystringKey;
         }
-
      }
-
-
 }

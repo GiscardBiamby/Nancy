@@ -1,10 +1,8 @@
-﻿using Nancy.Bootstrapper;
-
-namespace Nancy.Security
+﻿namespace Nancy.Security
 {
     using System;
     using Cookies;
-
+    using Nancy.Bootstrapper;
     using Nancy.Helpers;
 
     /// <summary>
@@ -25,7 +23,7 @@ namespace Nancy.Security
                 CsrfHookName,
                 context =>
                 {
-                    if (context.Response == null || context.Response.Cookies == null)
+                    if (context.Response == null || context.Response.Cookies == null || context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
                     {
                         return;
                     }
@@ -80,7 +78,7 @@ namespace Nancy.Security
         /// </summary>
         /// <param name="module">Nancy module</param>
         /// <returns></returns>
-        public static void CreateNewCsrfToken(this NancyModule module)
+        public static void CreateNewCsrfToken(this INancyModule module)
         {
             var token = new CsrfToken
             {
@@ -101,7 +99,7 @@ namespace Nancy.Security
         /// <param name="module">Module object</param>
         /// <param name="validityPeriod">Optional validity period before it times out</param>
         /// <exception cref="CsrfValidationException">If validation fails</exception>
-        public static void ValidateCsrfToken(this NancyModule module, TimeSpan? validityPeriod = null)
+        public static void ValidateCsrfToken(this INancyModule module, TimeSpan? validityPeriod = null)
         {
             var request = module.Request;
 

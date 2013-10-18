@@ -2,9 +2,12 @@ namespace Nancy
 {
     using System;
     using System.Collections.Generic;
+    using System.Collections.Specialized;
     using System.IO;
     using System.Linq;
     using System.Text.RegularExpressions;
+    using System.Security.Cryptography.X509Certificates;
+
     using IO;
     using Nancy.Extensions;
     using Session;
@@ -25,7 +28,7 @@ namespace Nancy
         /// <param name="method">The HTTP data transfer method used by the client.</param>
         /// <param name="path">The path of the requested resource, relative to the "Nancy root". This shold not not include the scheme, host name, or query portion of the URI.</param>
         /// <param name="scheme">The HTTP protocol that was used by the client.</param>
-        public Request(string method, string path, string scheme) 
+        public Request(string method, string path, string scheme)
             : this(method, new Url { Path = path, Scheme = scheme })
         {
         }
@@ -40,11 +43,11 @@ namespace Nancy
         /// <param name="scheme">The HTTP scheme that was used by the client.</param>
         /// <param name="query">The querystring data that was sent by the client.</param>
         public Request(string method, string path, IDictionary<string, IEnumerable<string>> headers, RequestStream body, string scheme, string query = null, string ip = null)
-            : this(method, new Url { Path=path, Scheme = scheme, Query = query ?? String.Empty}, body, headers, ip)
+            : this(method, new Url { Path = path, Scheme = scheme, Query = query ?? String.Empty }, body, headers, ip)
         {
         }
 
-        public Request(string method, Url url, RequestStream body = null, IDictionary<string, IEnumerable<string>> headers = null, string ip = null)
+        public Request(string method, Url url, RequestStream body = null, IDictionary<string, IEnumerable<string>> headers = null, string ip = null, byte[] certificate = null)
         {
             if (String.IsNullOrEmpty(method))
             {
@@ -56,16 +59,11 @@ namespace Nancy
                 throw new ArgumentNullException("url");
             }
 
-            if (String.IsNullOrEmpty(url.Path))
+            if (url.Path == null)
             {
-                throw new ArgumentOutOfRangeException("url.Path");
+                throw new ArgumentNullException("url.Path");
             }
 
-            if (url.Scheme == null)
-            {
-                throw new ArgumentNullException("url.Scheme");
-            }
-            
             if (String.IsNullOrEmpty(url.Scheme))
             {
                 throw new ArgumentOutOfRangeException("url.Scheme");
@@ -85,9 +83,24 @@ namespace Nancy
 
             this.Session = new NullSessionProvider();
 
+            if (certificate != null && certificate.Length != 0)
+            {
+                this.ClientCertificate = new X509Certificate2(certificate);
+            }
+
+            if (String.IsNullOrEmpty(this.Url.Path))
+            {
+                this.Url.Path = "/";
+            }
+
             this.ParseFormData();
             this.RewriteMethod();
         }
+
+        /// <summary>
+        /// Gets the certificate sent by the client.
+        /// </summary>
+        public X509Certificate ClientCertificate { get; private set; }
 
         /// <summary>
         /// Gets the IP address of the client
@@ -103,7 +116,7 @@ namespace Nancy
         /// <summary>
         /// Gets the url
         /// </summary>
-        public Url Url { get; private set; } 
+        public Url Url { get; private set; }
 
         /// <summary>
         /// Gets the request path, relative to the base path.
@@ -156,9 +169,20 @@ namespace Nancy
             }
 
             var values = this.Headers["cookie"].First().TrimEnd(';').Split(';');
-			foreach (var parts in values.Select (c => c.Split (new[] { '=' }, 2)))
+            foreach (var parts in values.Select(c => c.Split(new[] { '=' }, 2)))
             {
-                cookieDictionary[parts[0].Trim()] = parts[1];
+                var cookieName = parts[0].Trim();
+
+                if (parts.Length == 1)
+                {
+                    if (cookieName.Equals("HttpOnly", StringComparison.InvariantCulture) ||
+                        cookieName.Equals("Secure", StringComparison.InvariantCulture))
+                    {
+                        continue;
+                    }
+                }
+
+                cookieDictionary[cookieName] = parts[1];
             }
 
             return cookieDictionary;
@@ -215,26 +239,31 @@ namespace Nancy
             {
                 return;
             }
-            
+
             var boundary = Regex.Match(contentType, @"boundary=(?<token>[^\n\; ]*)").Groups["token"].Value;
             var multipart = new HttpMultipart(this.Body, boundary);
+
+            var formValues =
+                new NameValueCollection();
 
             foreach (var httpMultipartBoundary in multipart.GetBoundaries())
             {
                 if (string.IsNullOrEmpty(httpMultipartBoundary.Filename))
                 {
-                    var reader = new StreamReader(httpMultipartBoundary.Value);
-                    this.form[httpMultipartBoundary.Name] = reader.ReadToEnd();
+                    var reader =
+                        new StreamReader(httpMultipartBoundary.Value);
+                    formValues.Add(httpMultipartBoundary.Name, reader.ReadToEnd());
+
                 }
                 else
                 {
-                    this.files.Add(new HttpFile(
-                                       httpMultipartBoundary.ContentType,
-                                       httpMultipartBoundary.Filename,
-                                       httpMultipartBoundary.Value,
-									   httpMultipartBoundary.Name //include the form field that posted this file
-                                       ));
+                    this.files.Add(new HttpFile(httpMultipartBoundary));
                 }
+            }
+
+            foreach (var key in formValues.AllKeys.Where(key => key != null))
+            {
+                this.form[key] = formValues[key];
             }
 
             this.Body.Position = 0;
@@ -247,12 +276,34 @@ namespace Nancy
                 return;
             }
 
-            if (!this.Form["_method"].HasValue)
+            var overrides = 
+                new List<Tuple<string, string>>
+                {
+                    Tuple.Create("_method form input element", (string)this.Form["_method"]),
+                    Tuple.Create("X-HTTP-Method-Override form input element", (string)this.Form["X-HTTP-Method-Override"]),
+                    Tuple.Create("X-HTTP-Method-Override header", this.Headers["X-HTTP-Method-Override"].FirstOrDefault())
+                };
+
+            var providedOverride =
+                overrides.Where(x => !string.IsNullOrEmpty(x.Item2));
+
+            if (!providedOverride.Any())
             {
                 return;
             }
 
-            this.Method = this.Form["_method"];
+            if (providedOverride.Count() > 1)
+            {
+                var overrideSources =
+                    string.Join(", ", providedOverride);
+
+                var errorMessage =
+                    string.Format("More than one HTTP method override was provided. The provided values where: {0}", overrideSources);
+
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            this.Method = providedOverride.Single().Item2;
         }
     }
 }

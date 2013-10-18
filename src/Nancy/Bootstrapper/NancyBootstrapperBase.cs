@@ -4,7 +4,6 @@
     using System.Collections.Generic;
     using System.Diagnostics.CodeAnalysis;
     using System.Linq;
-    using System.Reflection;
     using Diagnostics;
     using Nancy.Cryptography;
     using Nancy.ModelBinding;
@@ -25,6 +24,11 @@
         /// prior to calling GetEngine.
         /// </summary>
         private bool initialised;
+
+        /// <summary>
+        /// Stores the <see cref="IRootPathProvider"/> used by Nancy
+        /// </summary>
+        private IRootPathProvider rootPathProvider;
 
         /// <summary>
         /// Default Nancy conventions
@@ -53,8 +57,6 @@
         /// </summary>
         protected NancyBootstrapperBase()
         {
-            AppDomainAssemblyTypeScanner.LoadNancyAssemblies();
-
             this.ApplicationPipelines = new Pipelines();
             this.conventions = new NancyConventions();
         }
@@ -98,9 +100,9 @@
                     this.modules 
                     ?? 
                     (this.modules = AppDomainAssemblyTypeScanner
-                                        .TypesOf<NancyModule>(true)
+                                        .TypesOf<INancyModule>(true)
                                         .NotOfType<DiagnosticModule>()
-                                        .Select(t => new ModuleRegistration(t, this.GetModuleKeyGenerator().GetKeyForModuleType(t)))
+                                        .Select(t => new ModuleRegistration(t))
                                         .ToArray());
             }
         }
@@ -165,9 +167,9 @@
         /// <summary>
         /// Gets the root path provider
         /// </summary>
-        protected virtual Type RootPathProvider
+        protected virtual IRootPathProvider RootPathProvider
         {
-            get { return AppDomainAssemblyTypeScanner.TypesOf<IRootPathProvider>(true).FirstOrDefault() ?? typeof(DefaultRootPathProvider); }
+            get { return this.rootPathProvider ?? (this.rootPathProvider = GetRootPathProvider()); }
         }
 
         /// <summary>
@@ -247,19 +249,28 @@
 
             foreach (var applicationRegistrationTask in this.GetApplicationRegistrationTasks().ToList())
             {
-                if (applicationRegistrationTask.TypeRegistrations != null)
+                var applicationTypeRegistrations = 
+                    applicationRegistrationTask.TypeRegistrations;
+
+                if (applicationTypeRegistrations != null)
                 {
-                    this.RegisterTypes(this.ApplicationContainer, applicationRegistrationTask.TypeRegistrations);
+                    this.RegisterTypes(this.ApplicationContainer, applicationTypeRegistrations);
                 }
 
-                if (applicationRegistrationTask.CollectionTypeRegistrations != null)
+                var applicationCollectionRegistrations =
+                    applicationRegistrationTask.CollectionTypeRegistrations;
+
+                if (applicationCollectionRegistrations != null)
                 {
-                    this.RegisterCollectionTypes(this.ApplicationContainer, applicationRegistrationTask.CollectionTypeRegistrations);
+                    this.RegisterCollectionTypes(this.ApplicationContainer, applicationCollectionRegistrations);
                 }
 
-                if (applicationRegistrationTask.InstanceRegistrations != null)
+                var applicationInstanceRegistrations =
+                    applicationRegistrationTask.InstanceRegistrations;
+
+                if (applicationInstanceRegistrations != null)
                 {
-                    this.RegisterInstances(this.ApplicationContainer, applicationRegistrationTask.InstanceRegistrations);
+                    this.RegisterInstances(this.ApplicationContainer, applicationInstanceRegistrations);
                 }
             }
 
@@ -303,7 +314,7 @@
         }
 
         /// <summary>
-        /// Gets the diagnostics for intialisation
+        /// Gets the diagnostics for initialisation
         /// </summary>
         /// <returns>IDiagnostics implementation</returns>
         protected abstract IDiagnostics GetDiagnostics();
@@ -324,16 +335,16 @@
         /// Get all NancyModule implementation instances
         /// </summary>
         /// <param name="context">The current context</param>
-        /// <returns>An <see cref="IEnumerable{T}"/> instance containing <see cref="NancyModule"/> instances.</returns>
-        public abstract IEnumerable<NancyModule> GetAllModules(NancyContext context);
+        /// <returns>An <see cref="IEnumerable{T}"/> instance containing <see cref="INancyModule"/> instances.</returns>
+        public abstract IEnumerable<INancyModule> GetAllModules(NancyContext context);
 
         /// <summary>
-        /// Retrieves a specific <see cref="NancyModule"/> implementation based on its key
+        /// Retrieves a specific <see cref="INancyModule"/> implementation - should be per-request lifetime
         /// </summary>
-        /// <param name="moduleKey">Module key</param>
+        /// <param name="moduleType">Module type</param>
         /// <param name="context">The current context</param>
-        /// <returns>The <see cref="NancyModule"/> instance that was retrived by the <paramref name="moduleKey"/> parameter.</returns>
-        public abstract NancyModule GetModuleByKey(string moduleKey, NancyContext context);
+        /// <returns>The <see cref="INancyModule"/> instance</returns>
+        public abstract INancyModule GetModule(Type moduleType, NancyContext context);
 
         /// <summary>
         /// Gets the configured INancyEngine
@@ -346,7 +357,7 @@
                 throw new InvalidOperationException("Bootstrapper is not initialised. Call Initialise before GetEngine");
             }
 
-            var engine = this.GetEngineInternal();
+            var engine = this.SafeGetNancyEngineInstance();
 
             engine.RequestPipelinesFactory = this.InitializeRequestPipelines;
 
@@ -441,12 +452,6 @@
         protected abstract INancyEngine GetEngineInternal();
 
         /// <summary>
-        /// Get the moduleKey generator
-        /// </summary>
-        /// <returns>IModuleKeyGenerator instance</returns>
-        protected abstract IModuleKeyGenerator GetModuleKeyGenerator();
-
-        /// <summary>
         /// Gets the application level container
         /// </summary>
         /// <returns>Container instance</returns>
@@ -496,7 +501,9 @@
         /// <returns>Collection of TypeRegistration types</returns>
         private IEnumerable<TypeRegistration> GetAdditionalTypes()
         {
-            return new[] { new TypeRegistration(typeof(IRootPathProvider), this.RootPathProvider) };
+            return new[] {
+                new TypeRegistration(typeof(IViewRenderer), typeof(DefaultViewRenderer)),            
+            };
         }
 
         /// <summary>
@@ -510,6 +517,7 @@
                 new InstanceRegistration(typeof(CryptographyConfiguration), this.CryptographyConfiguration),
                 new InstanceRegistration(typeof(NancyInternalConfiguration), this.InternalConfiguration), 
                 new InstanceRegistration(typeof(DiagnosticsConfiguration), this.DiagnosticsConfiguration), 
+                new InstanceRegistration(typeof(IRootPathProvider), this.RootPathProvider), 
             };
         }
 
@@ -530,6 +538,37 @@
                     new CollectionTypeRegistration(typeof(IApplicationRegistrations), this.ApplicationRegistrationTasks), 
                     new CollectionTypeRegistration(typeof(IModelValidatorFactory), this.ModelValidatorFactories)
                 };
+        }
+
+        private INancyEngine SafeGetNancyEngineInstance()
+        {
+            try
+            {
+                return this.GetEngineInternal();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "Something went wrong when trying to satisfy one of the dependencies during composition, make sure that you've registered all new dependencies in the container and inspect the innerexception for more details.",
+                    ex);
+            }
+        }
+
+        private static IRootPathProvider GetRootPathProvider()
+        {
+            var providerTypes = AppDomainAssemblyTypeScanner
+                .TypesOf<IRootPathProvider>(ScanMode.ExcludeNancy)
+                .ToArray();
+
+            if (providerTypes.Length > 1)
+            {
+                throw new MultipleRootPathProvidersLocatedException(providerTypes);
+            }
+
+            var providerType = 
+                providerTypes.SingleOrDefault() ?? typeof(DefaultRootPathProvider);
+
+            return Activator.CreateInstance(providerType) as IRootPathProvider;
         }
     }
 }

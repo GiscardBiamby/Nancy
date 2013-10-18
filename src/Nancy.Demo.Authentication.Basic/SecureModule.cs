@@ -1,7 +1,7 @@
-﻿using Nancy.Security;
-
-namespace Nancy.Demo.Authentication.Basic
+﻿namespace Nancy.Demo.Authentication.Basic
 {
+    using Nancy.Security;
+
 	public class SecureModule : NancyModule
 	{
 		public SecureModule()
@@ -11,7 +11,7 @@ namespace Nancy.Demo.Authentication.Basic
 
 			Get["/"] = x =>
 			{
-				return "Hello " + Context.CurrentUser.UserName;
+				return "Hello " + this.Context.CurrentUser.UserName;
 			};
 		}
 	}

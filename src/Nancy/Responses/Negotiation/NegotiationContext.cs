@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using Cookies;
 
     /// <summary>
     /// Context for content negotiation.
@@ -14,10 +15,17 @@
         /// </summary>
         public NegotiationContext()
         {
+            this.Cookies = new List<INancyCookie>();
             this.PermissableMediaRanges = new List<MediaRange>(new[] { (MediaRange)"*/*" });
             this.MediaRangeModelMappings = new Dictionary<MediaRange, Func<dynamic>>();
             this.Headers = new Dictionary<string, string>();
         }
+
+        /// <summary>
+        /// Gets or sets additional cookies to assign to the response.
+        /// </summary>
+        /// <value>An <see cref="IList{T}"/> of <see cref="INancyCookie"/> instances.</value>
+        public IList<INancyCookie> Cookies { get; set; }
 
         /// <summary>
         /// Gets or sets the default model that will be used if a content type specific model is not specified.
@@ -38,13 +46,13 @@
         public IDictionary<MediaRange, Func<dynamic>> MediaRangeModelMappings { get; set; }
 
         /// <summary>
-        /// The name of the <see cref="NancyModule"/> that is locating a view.
+        /// The name of the <see cref="INancyModule"/> that is locating a view.
         /// </summary>
         /// <value>A <see cref="string"/> containing the name of the module.</value>
         public string ModuleName { get; set; }
 
         /// <summary>
-        /// The module path of the <see cref="NancyModule"/> that is locating a view.
+        /// The module path of the <see cref="INancyModule"/> that is locating a view.
         /// </summary>
         /// <value>A <see cref="string"/> containing the module path.</value>
         public string ModulePath { get; set; }
@@ -55,6 +63,12 @@
         /// <value>A list of the allowed media ranges.</value>
         public IList<MediaRange> PermissableMediaRanges { get; set; }
 
+        /// <summary>
+        /// Gets or sets the status code of the response.
+        /// </summary>
+        /// <value>A <see cref="HttpStatusCode"/> value.</value>
+        public HttpStatusCode? StatusCode { get; set; }
+        
         /// <summary>
         /// Gets or sets the view name if one is required.
         /// </summary>

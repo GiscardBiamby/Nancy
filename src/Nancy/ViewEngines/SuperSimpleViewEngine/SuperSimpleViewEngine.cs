@@ -20,9 +20,14 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         private static readonly Regex SingleSubstitutionsRegEx = new Regex(@"@(?<Encode>!)?Model(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))*;?", RegexOptions.Compiled);
 
         /// <summary>
+        /// Compiled Regex for context subsituations
+        /// </summary>
+        private static readonly Regex ContextSubstitutionsRegEx = new Regex(@"@(?<Encode>!)?Context(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))*;?", RegexOptions.Compiled);
+
+        /// <summary>
         /// Compiled Regex for each blocks
         /// </summary>
-        private static readonly Regex EachSubstitutionRegEx = new Regex(@"@Each(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))*;?(?<Contents>.*?)@EndEach;?", RegexOptions.Compiled | RegexOptions.Singleline);
+        private static readonly Regex EachSubstitutionRegEx = new Regex(@"@Each(?:\.(?<ModelSource>(Model|Context)+))?(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))*;?(?<Contents>.*?)@EndEach;?", RegexOptions.Compiled | RegexOptions.Singleline);
 
         /// <summary>
         /// Compiled Regex for each block current substitutions
@@ -32,7 +37,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <summary>
         /// Compiled Regex for if blocks
         /// </summary>
-        private static readonly Regex ConditionalSubstitutionRegEx = new Regex(@"@If(?<Not>Not)?(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))+;?(?<Contents>.*?)@EndIf;?", RegexOptions.Compiled | RegexOptions.Singleline);
+        private static readonly Regex ConditionalSubstitutionRegEx = new Regex(@"@If(?<Not>Not)?(?<Null>Null)?(?:\.(?<ModelSource>(Model|Context)+))?(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))+;?(?<Contents>.*?)@EndIf;?", RegexOptions.Compiled | RegexOptions.Singleline);
 
         /// <summary>
         /// Compiled regex for partial blocks
@@ -70,20 +75,38 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         private readonly List<Func<string, object, IViewEngineHost, string>> processors;
 
         /// <summary>
+        /// View engine extensions
+        /// </summary>
+        private readonly IEnumerable<ISuperSimpleViewEngineMatcher> matchers;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="SuperSimpleViewEngine"/> class.
         /// </summary>
         public SuperSimpleViewEngine()
+            : this(Enumerable.Empty<ISuperSimpleViewEngineMatcher>())
         {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SuperSimpleViewEngine"/> class, using
+        /// the provided <see cref="ISuperSimpleViewEngineMatcher"/> extensions.
+        /// </summary>
+        /// <param name="matchers">The matchers to use with the engine.</param>
+        public SuperSimpleViewEngine(IEnumerable<ISuperSimpleViewEngineMatcher> matchers)
+        {
+            this.matchers = matchers ?? Enumerable.Empty<ISuperSimpleViewEngineMatcher>();
+
             this.processors = new List<Func<string, object, IViewEngineHost, string>>
-                {
-                    this.PerformSingleSubstitutions,
-                    this.PerformEachSubstitutions,
-                    this.PerformConditionalSubstitutions,
-                    this.PerformPathSubstitutions,
-                    this.PerformAntiForgeryTokenSubstitutions,
-                    this.PerformPartialSubstitutions,
-                    this.PerformMasterPageSubstitutions,
-                };
+            {
+                PerformSingleSubstitutions,
+                PerformContextSubstitutions,
+                PerformEachSubstitutions,
+                PerformConditionalSubstitutions,
+                PerformPathSubstitutions,
+                PerformAntiForgeryTokenSubstitutions,
+                this.PerformPartialSubstitutions,
+                this.PerformMasterPageSubstitutions,
+            };
         }
 
         /// <summary>
@@ -95,7 +118,10 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <returns>A string containing the expanded template.</returns>
         public string Render(string template, dynamic model, IViewEngineHost host)
         {
-            return this.processors.Aggregate(template, (current, processor) => processor(current, model ?? new object(), host));
+            var output = 
+                this.processors.Aggregate(template, (current, processor) => processor(current, model ?? new object(), host));
+
+            return this.matchers.Aggregate(output, (current, extension) => extension.Invoke(current, model, host));
         }
 
         /// <summary>
@@ -211,8 +237,9 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// </summary>
         /// <param name="item">The item to evaluate</param>
         /// <param name="properties">Property list to evaluate</param>
+        /// <param name="nullCheck">Whether to check for null, rather than straight boolean</param>
         /// <returns>Bool representing the predicate result</returns>
-        private static bool GetPredicateResult(object item, IEnumerable<string> properties)
+        private static bool GetPredicateResult(object item, IEnumerable<string> properties, bool nullCheck)
         {
             var substitutionObject = GetPropertyValueFromParameterCollection(item, properties);
 
@@ -226,23 +253,23 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                 return GetHasPredicateResultFromSubstitutionObject(substitutionObject.Item2);
             }
 
-            if (substitutionObject.Item2 == null)
-            {
-                return false;
-            }
-
-            return GetPredicateResultFromSubstitutionObject(substitutionObject.Item2);
+            return GetPredicateResultFromSubstitutionObject(substitutionObject.Item2, nullCheck);
         }
 
         /// <summary>
         /// Returns the predicate result if the substitionObject is a valid bool
         /// </summary>
         /// <param name="substitutionObject">The substitution object.</param>
+        /// <param name="nullCheck"></param>
         /// <returns>Bool value of the substitutionObject, or false if unable to cast.</returns>
-        private static bool GetPredicateResultFromSubstitutionObject(object substitutionObject)
+        private static bool GetPredicateResultFromSubstitutionObject(object substitutionObject, bool nullCheck)
         {
-            var predicateResult = false;
+            if (nullCheck)
+            {
+                return substitutionObject == null;
+            }
 
+            var predicateResult = false;
             var substitutionBool = substitutionObject as bool?;
             if (substitutionBool != null)
             {
@@ -277,7 +304,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <param name="model">The model.</param>
         /// <param name="host">View engine host</param>
         /// <returns>Template with @Model.PropertyName blocks expanded.</returns>
-        private string PerformSingleSubstitutions(string template, object model, IViewEngineHost host)
+        private static string PerformSingleSubstitutions(string template, object model, IViewEngineHost host)
         {
             return SingleSubstitutionsRegEx.Replace(
                 template,
@@ -302,19 +329,57 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         }
 
         /// <summary>
+        /// Peforms single @Context.PropertyName substitutions.
+        /// </summary>
+        /// <param name="template">The template.</param>
+        /// <param name="model">The model.</param>
+        /// <param name="host">View engine host</param>
+        /// <returns>Template with @Context.PropertyName blocks expanded.</returns>
+        private static string PerformContextSubstitutions(string template, object model, IViewEngineHost host)
+        {
+            return ContextSubstitutionsRegEx.Replace(
+                template,
+                m =>
+                {
+                    var properties = GetCaptureGroupValues(m, "ParameterName");
+
+                    var substitution = GetPropertyValueFromParameterCollection(host.Context, properties);
+
+                    if (!substitution.Item1)
+                    {
+                        return "[ERR!]";
+                    }
+
+                    if (substitution.Item2 == null)
+                    {
+                        return string.Empty;
+                    }
+
+                    return m.Groups["Encode"].Success ? host.HtmlEncode(substitution.Item2.ToString()) : substitution.Item2.ToString();
+                });
+        }
+
+        /// <summary>
         /// Performs @Each.PropertyName substitutions
         /// </summary>
         /// <param name="template">The template.</param>
         /// <param name="model">The model.</param>
         /// <param name="host">View engine host</param>
         /// <returns>Template with @Each.PropertyName blocks expanded.</returns>
-        private string PerformEachSubstitutions(string template, object model, IViewEngineHost host)
+        private static string PerformEachSubstitutions(string template, object model, IViewEngineHost host)
         {
             return EachSubstitutionRegEx.Replace(
                 template,
                 m =>
                 {
                     var properties = GetCaptureGroupValues(m, "ParameterName");
+
+                    var modelSource = GetCaptureGroupValues(m, "ModelSource").SingleOrDefault();
+
+                    if (modelSource != null && modelSource.Equals("Context", StringComparison.OrdinalIgnoreCase))
+                    {
+                        model = host.Context;
+                    }
 
                     var substitutionObject = GetPropertyValueFromParameterCollection(model, properties);
 
@@ -352,7 +417,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <param name="item">Current item from the @Each enumerable</param>
         /// <param name="host">View engine host</param>
         /// <returns>String result of the expansion of the @Each.</returns>
-        private string ReplaceCurrentMatch(string contents, object item, IViewEngineHost host)
+        private static string ReplaceCurrentMatch(string contents, object item, IViewEngineHost host)
         {
             return EachItemSubstitutionRegEx.Replace(
                 contents,
@@ -388,7 +453,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <param name="model">The model.</param>
         /// <param name="host">View engine host</param>
         /// <returns>Template with @If.PropertyName @IfNot.PropertyName blocks removed/expanded.</returns>
-        private string PerformConditionalSubstitutions(string template, object model, IViewEngineHost host)
+        private static string PerformConditionalSubstitutions(string template, object model, IViewEngineHost host)
         {
             var result = template;
 
@@ -398,7 +463,14 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                 {
                     var properties = GetCaptureGroupValues(m, "ParameterName");
 
-                    var predicateResult = GetPredicateResult(model, properties);
+                    var modelSource = GetCaptureGroupValues(m, "ModelSource").SingleOrDefault();
+
+                    if (modelSource != null && modelSource.Equals("Context", StringComparison.OrdinalIgnoreCase))
+                    {
+                        model = host.Context;
+                    }
+
+                    var predicateResult = GetPredicateResult(model, properties, m.Groups["Null"].Value == "Null");
 
                     if (m.Groups["Not"].Value == "Not")
                     {
@@ -418,7 +490,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <param name="model">The model.</param>
         /// <param name="host">View engine host</param>
         /// <returns>Template with paths expanded</returns>
-        private string PerformPathSubstitutions(string template, object model, IViewEngineHost host)
+        private static string PerformPathSubstitutions(string template, object model, IViewEngineHost host)
         {
             var result = template;
 
@@ -441,7 +513,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <param name="model">The model.</param>
         /// <param name="host">View engine host</param>
         /// <returns>Template with anti forgery tokens expanded</returns>
-        private string PerformAntiForgeryTokenSubstitutions(string template, object model, IViewEngineHost host)
+        private static string PerformAntiForgeryTokenSubstitutions(string template, object model, IViewEngineHost host)
         {
             return AntiForgeryTokenRegEx.Replace(template, x => host.AntiForgeryToken());
         }
@@ -494,7 +566,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <returns>Template with master page applied and sections substituted</returns>
         private string PerformMasterPageSubstitutions(string template, object model, IViewEngineHost host)
         {
-            var masterPageName = this.GetMasterPageName(template);
+            var masterPageName = GetMasterPageName(template);
 
             if (string.IsNullOrWhiteSpace(masterPageName))
             {
@@ -533,11 +605,11 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         }
 
         /// <summary>
-        /// Gets the master page name, if one is specificed
+		/// Gets the master page name, if one is specified
         /// </summary>
         /// <param name="template">The template</param>
         /// <returns>Master page name or String.Empty</returns>
-        private string GetMasterPageName(string template)
+        private static string GetMasterPageName(string template)
         {
             using (var stringReader = new StringReader(template))
             {

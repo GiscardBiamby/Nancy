@@ -16,7 +16,7 @@ namespace Nancy.Testing.Tests
         public AssertExtensionsTests()
         {
             var document =
-                CQ.Create(@"<html><head></head><body><div id='testId' class='myClass'>Test</div><div class='anotherClass'>Tes</div><span class='class'>some contents</span><span class='class'>This has contents</span></body></html>");
+                CQ.Create(@"<html><head></head><body><div id='testId' class='myClass' attribute1 attribute2='value2'>Test</div><div class='anotherClass'>Tes</div><span class='class'>some contents</span><span class='class'>This has contents</span></body></html>");
 
             this.query =
                 new QueryWrapper(document);
@@ -43,6 +43,16 @@ namespace Nancy.Testing.Tests
         }
 
         [Fact]
+        public void Should_detect_nonexistence()
+        {
+            // Given, When
+            var result = Record.Exception(() => this.query["#jamesIsAwesome"].ShouldNotExist());
+
+            // Then
+            Assert.Null(result);
+        }
+
+        [Fact]
         public void Should_not_throw_exception_when_id_that_should_only_exists_once_only_exists_once()
         {
             // Given, When
@@ -60,6 +70,26 @@ namespace Nancy.Testing.Tests
 
             // Then
             Assert.IsType<AndConnector<NodeWrapper>>(result);
+        }
+
+        [Fact]
+        public void ShouldExistsExactly2_Exists2_ReturnsResultAndConnector()
+        {
+            // Given, when
+            var result = this.query[".class"].ShouldExistExactly(2);
+
+            // Then
+            Assert.IsType<AndConnector<QueryWrapper>>(result);
+        }
+
+        [Fact]
+        public void ShouldExistsExactly3_Exists2_ReturnsResultAndConnector()
+        {
+            // When
+            var result = Record.Exception(() => this.query[".class"].ShouldExistExactly(3));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
         }
 
         [Fact]
@@ -197,6 +227,149 @@ namespace Nancy.Testing.Tests
 
             // Then
             Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_SingleElementNotContainingAttribute_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("nope"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+        
+        [Fact]
+        public void ShouldContainAttribute_SingleElementNotContainingAttributeAndValue_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("nope", "nope"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_SingleElementContainingAttributeWithoutValueButShouldContainValue_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute1", "nope"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_SingleElementContainingAttributeWithDifferentValue_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute2", "nope"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_SingleElementContainingAttribute_ShouldNotThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute1"));
+
+            // Then
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_SingleElementContainingAttributeAndValueButIngoringValue_ShouldNotThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute2"));
+
+            // Then
+            Assert.Null(result);
+        }
+        
+        [Fact]
+        public void ShouldContainAttribute_SingleElementContainingAttributeAndValue_ShouldNotThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["#testId"].First();
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute2", "value2"));
+
+            // Then
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_MultipleElementsOneNotContainingAttribute_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["div"];
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("attribute1"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_MultipleElementsOneNotContainingAttributeAndValue_ShouldThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["div"];
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("class", "myClass"));
+
+            // Then
+            Assert.IsAssignableFrom<AssertException>(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_MultipleElementsContainingAttribute_ShouldNotThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["div"];
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("class"));
+
+            // Then
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public void ShouldContainAttribute_MultipleElementsContainingAttributeAndValue_ShouldNotThrowAssert()
+        {
+            // Given
+            var htmlNode = this.query["span"];
+
+            // When
+            var result = Record.Exception(() => htmlNode.ShouldContainAttribute("class", "class"));
+
+            // Then
+            Assert.Null(result);
         }
     }
 }

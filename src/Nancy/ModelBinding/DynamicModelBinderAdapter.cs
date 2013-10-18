@@ -8,19 +8,10 @@
     /// </summary>
     public class DynamicModelBinderAdapter : DynamicObject
     {
-        /// <summary>
-        /// Model binder locator
-        /// </summary>
         private readonly IModelBinderLocator locator;
-
-        /// <summary>
-        /// Nancy context
-        /// </summary>
         private readonly NancyContext context;
-
-        /// <summary>
-        /// Properties that are blacklisted for binding
-        /// </summary>
+        private readonly object instance;
+        private readonly BindingConfig configuration;
         private readonly string[] blacklistedProperties;
 
         /// <summary>
@@ -28,7 +19,10 @@
         /// </summary>
         /// <param name="locator">Model binder locator</param>
         /// <param name="context">Nancy context</param>
-        public DynamicModelBinderAdapter(IModelBinderLocator locator, NancyContext context, params string[] blacklistedProperties)
+        /// <param name="instance">Optional existing instance, or null</param>
+        /// <param name="configuration">The <see cref="BindingConfig"/> that should be applied during binding.</param>
+        /// <param name="blacklistedProperties">Blacklisted property names</param>
+        public DynamicModelBinderAdapter(IModelBinderLocator locator, NancyContext context, object instance, BindingConfig configuration, params string[] blacklistedProperties)
         {
             if (locator == null)
             {
@@ -40,8 +34,15 @@
                 throw new ArgumentNullException("context");
             }
 
+            if (configuration == null)
+            {
+                throw new ArgumentNullException("configuration");
+            }
+
             this.locator = locator;
             this.context = context;
+            this.instance = instance;
+            this.configuration = configuration;
             this.blacklistedProperties = blacklistedProperties;
         }
 
@@ -61,7 +62,7 @@
                 throw new ModelBindingException(binder.Type);
             }
 
-            result = modelBinder.Bind(this.context, binder.Type, this.blacklistedProperties);
+            result = modelBinder.Bind(this.context, binder.Type, this.instance, this.configuration, this.blacklistedProperties);
 
             return result != null || base.TryConvert(binder, out result);
         }

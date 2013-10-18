@@ -8,8 +8,7 @@
     using Bootstrapper;
 
     using Nancy.ErrorHandling;
-
-    using TinyIoC;
+    using Nancy.TinyIoc;
 
     public class FakeDefaultNancyBootstrapper : DefaultNancyBootstrapper
     {
@@ -19,19 +18,25 @@
         {
             get
             {
-                return new[] { new ModuleRegistration(typeof(FakeNancyModuleWithoutBasePath), "Module") };
+                return new[] { new ModuleRegistration(typeof(FakeNancyModuleWithoutBasePath)) };
             }
         }
         public FakeDefaultNancyBootstrapper()
-            : this(NancyInternalConfiguration.WithOverrides(b => b.ErrorHandlers = new List<Type>(new[] { typeof(DefaultErrorHandler) })))
+            : this(NancyInternalConfiguration.WithOverrides(b => b.StatusCodeHandlers = new List<Type>(new[] { typeof(DefaultStatusCodeHandler) })))
         {
             
         }
 
+        protected override IEnumerable<Func<Assembly, bool>> AutoRegisterIgnoredAssemblies
+        {
+            get
+            {
+                return base.AutoRegisterIgnoredAssemblies.Union(new Func<Assembly, bool>[] { asm => asm.FullName.StartsWith("TestAssembly") });
+            }
+        }
         public FakeDefaultNancyBootstrapper(NancyInternalConfiguration configuration)
         {
-            this.configuration = configuration.WithIgnoredAssembly(asm => asm.FullName.StartsWith("TestAssembly"));
-
+            this.configuration = configuration;
             this.RequestContainerInitialisations = new Dictionary<NancyContext, int>();
         }
 
@@ -44,7 +49,7 @@
 
         public bool ApplicationContainerConfigured { get; set; }
 
-        public TinyIoC.TinyIoCContainer Container { get { return this.ApplicationContainer; } }
+        public TinyIoCContainer Container { get { return this.ApplicationContainer; } }
 
         public Request ConfigureRequestContainerLastRequest { get; set; }
 
@@ -80,7 +85,7 @@
             this.RequestContainerInitialisations[context] = this.RequestContainerInitialisations[context] + 1;
         }
 
-        protected override void ConfigureApplicationContainer(TinyIoC.TinyIoCContainer existingContainer)
+        protected override void ConfigureApplicationContainer(TinyIoCContainer existingContainer)
         {
             ApplicationContainerConfigured = true;
             base.ConfigureApplicationContainer(existingContainer);

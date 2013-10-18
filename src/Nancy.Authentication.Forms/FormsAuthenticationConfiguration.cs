@@ -42,6 +42,27 @@ namespace Nancy.Authentication.Forms
         public IUserMapper UserMapper { get; set; }
 
         /// <summary>
+        /// Gets or sets RequiresSSL property
+        /// </summary>
+        /// <value>The flag that indicates whether SSL is required</value>
+        public bool RequiresSSL { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether to redirect to login page during unauthorized access.
+        /// </summary>
+        public bool DisableRedirect { get; set; }
+
+        /// <summary>
+        /// Gets or sets the domain of the auth cookie
+        /// </summary>
+        public string Domain { get; set; }
+
+        /// <summary>
+        /// Gets or sets the path of the auth cookie
+        /// </summary>
+        public string Path { get; set; }
+
+        /// <summary>
         /// Gets or sets the cryptography configuration
         /// </summary>
         public CryptographyConfiguration CryptographyConfiguration { get; set; }
@@ -53,7 +74,7 @@ namespace Nancy.Authentication.Forms
         {
             get
             {
-                if (string.IsNullOrEmpty(this.RedirectUrl))
+                if (!this.DisableRedirect && string.IsNullOrEmpty(this.RedirectUrl))
                 {
                     return false;
                 }

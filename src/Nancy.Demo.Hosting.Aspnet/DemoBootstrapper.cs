@@ -5,10 +5,11 @@
     using Conventions;
 
     using Nancy.Diagnostics;
+    using Nancy.Security;
     using Nancy.Session;
+    using Nancy.TinyIoc;
+    using Nancy.ViewEngines;
     using Nancy.ViewEngines.Razor;
-
-    using TinyIoC;
 
     public class DemoBootstrapper : DefaultNancyBootstrapper
     {
@@ -21,12 +22,11 @@
 
         // Overriding this just to show how it works, not actually necessary as autoregister
         // takes care of it all.
-        protected override void ConfigureApplicationContainer(TinyIoC.TinyIoCContainer existingContainer)
+        protected override void ConfigureApplicationContainer(TinyIoCContainer existingContainer)
         {
             // We don't call base because we don't want autoregister
             // we just register our one known dependency as an application level singleton
             existingContainer.Register<IApplicationDependency, ApplicationDependencyClass>().AsSingleton();
-            existingContainer.Register<IRazorConfiguration, MyRazorConfiguration>().AsSingleton();
         }
 
         protected override void ConfigureRequestContainer(TinyIoCContainer existingContainer, NancyContext context)
@@ -36,13 +36,13 @@
             existingContainer.Register<IRequestDependency, RequestDependencyClass>().AsSingleton();
         }
 
-        protected override void ApplicationStartup(TinyIoC.TinyIoCContainer container, IPipelines pipelines)
+        protected override void ApplicationStartup(TinyIoCContainer container, IPipelines pipelines)
         {
             base.ApplicationStartup(container, pipelines);
 
             StaticConfiguration.EnableRequestTracing = true;
-            StaticConfiguration.DisableCaches = false;
             StaticConfiguration.DisableErrorTraces = false;
+            Csrf.Enable(pipelines);
 
             this.Conventions.StaticContentsConventions.Add(StaticContentConventionBuilder.AddDirectory("moo", "Content"));
 

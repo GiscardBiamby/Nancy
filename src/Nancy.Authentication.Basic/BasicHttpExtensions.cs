@@ -1,8 +1,8 @@
-﻿using Nancy.Bootstrapper;
-
-namespace Nancy.Authentication.Basic
+﻿namespace Nancy.Authentication.Basic
 {
-	/// <summary>
+    using Nancy.Bootstrapper;
+    
+    /// <summary>
 	/// Some simple helpers give some nice authentication syntax in the modules.
 	/// </summary>
 	public static class BasicHttpExtensions
@@ -12,7 +12,7 @@ namespace Nancy.Authentication.Basic
 		/// </summary>
 		/// <param name="module">Module to enable</param>
 		/// <param name="configuration">Basic authentication configuration</param>
-		public static void EnableBasicAuthentication(this NancyModule module, BasicAuthenticationConfiguration configuration)
+		public static void EnableBasicAuthentication(this INancyModule module, BasicAuthenticationConfiguration configuration)
 		{
 			BasicAuthentication.Enable(module, configuration);
 		}

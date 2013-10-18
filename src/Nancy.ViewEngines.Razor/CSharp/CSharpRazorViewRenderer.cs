@@ -1,9 +1,10 @@
 ﻿namespace Nancy.ViewEngines.Razor.CSharp
 {
+    using System;
     using System.CodeDom.Compiler;
     using System.Collections.Generic;
     using System.Web.Razor;
-
+    using System.Web.Razor.Generator;
     using Microsoft.CSharp;
 
     using Nancy.Extensions;
@@ -11,7 +12,7 @@
     /// <summary>
     /// Renderer for CSharp razor files.
     /// </summary>
-    public class CSharpRazorViewRenderer : IRazorViewRenderer
+    public class CSharpRazorViewRenderer : IRazorViewRenderer, IDisposable
     {
         /// <summary>
         /// Gets the assemblies.
@@ -26,7 +27,12 @@
             get { return "cshtml"; }
         }
 
-        /// <summary>
+        
+
+        /// <summary>/// <summary>
+        /// Gets the <see cref="SetBaseTypeCodeGenerator"/> that should be used with the renderer.
+        /// </summary>
+        public Type ModelCodeGenerator { get; private set; }
         /// Gets the host.
         /// </summary>
         public RazorEngineHost Host { get; private set; }
@@ -46,11 +52,25 @@
                 typeof(Microsoft.CSharp.RuntimeBinder.Binder).GetAssemblyPath()
             };
 
+            this.ModelCodeGenerator = typeof(CSharpModelCodeGenerator);
+
             this.Provider = new CSharpCodeProvider();
 
             this.Host = new NancyRazorEngineHost(new CSharpRazorCodeLanguage());
 
             this.Host.NamespaceImports.Add("Microsoft.CSharp.RuntimeBinder");
+        }
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        /// <filterpriority>2</filterpriority>
+        public void Dispose()
+        {
+            if (this.Provider != null)
+            {
+                this.Provider.Dispose();
+            }
         }
     }
 }

@@ -24,10 +24,12 @@ Compile, run and enjoy the simple, elegant design!
 * Built from the bottom up, not simply a DSL on top of an existing framework. Removing limitations and feature hacks of an underlying framework, as well as the need to reference more assemblies than you need. _keep it light_
 * Run anywhere. Nancy is not built on any specific hosting technology can be run anywhere. Out of the box, Nancy supports running on ASP.NET/IIS, WCF, Self-hosting and any [OWIN](http://owin.org)
 * Ultra lightweight action declarations for GET, HEAD, PUT, POST, DELETE, OPTIONS and PATCH requests
-* View engine integration (Razor, Spark, NDjango, dotLiquid and our own SuperSimpleViewEngine)
+* View engine integration (Razor, Spark, dotLiquid, our own SuperSimpleViewEngine and many more)
 * Powerful request path matching that includes advanced parameter capabilities. The path matching strategy can be replaced with custom implementations to fit your exact needs
 * Easy response syntax, enabling you to return things like int, string, HttpStatusCode and Action<Stream> elements without having to explicitly cast or wrap your response - you just return it and Nancy _will_ do the work for you
 * A powerful, light-weight, testing framework to help you verify the behavior of your application
+* Content negotiation
+* And much, much more
 
 ## The super-duper-happy-path
 
@@ -44,8 +46,7 @@ Above all, creating an application with Nancy should be a pleasure, and hopefull
 
 ## Community
 
-You can find lot of Nancy users on the [Nancy User Group](https://groups.google.com/forum/?fromgroups#forum/nancy-web-framework). That is where most of the discussions regarding the development and usage of Nancy is taking place. You can also
-find Nancy on Twitter using the #NancyFx hashtag.	
+You can find lot of Nancy users on the [Nancy User Group](https://groups.google.com/forum/?fromgroups#forum/nancy-web-framework). That is where most of the discussions regarding the development and usage of Nancy is taking place. Nancy followers can be found in the JabbR [#NancyFX room](http://jabbr.net/#/rooms/nancyfx). You can also find Nancy on Twitter using the #NancyFx hashtag.	
 	
 ## Help out
 
@@ -75,4 +76,16 @@ Copyright © 2010 Andreas Håkansson, Steven Robbins and contributors
 ## License
 
 Nancy is licensed under [MIT](http://www.opensource.org/licenses/mit-license.php "Read more about the MIT license form"). Refer to license.txt for more information.
+
+## CI Builds
+
+### TC (.net) 
+[![Build Status](http://teamcity.codebetter.com/app/rest/builds/buildType:%28id:bt314%29/statusIcon)](http://teamcity.codebetter.com/viewType.html?buildTypeId=bt314&guest=1)
+
+### Travis (Mono 2.x) 
+[![Build Status](https://travis-ci.org/NancyFx/Nancy.png?branch=master)](https://travis-ci.org/NancyFx/Nancy)
+
+### TC (Mono 3.x) 
+[![Build Status](http://teamcity.codebetter.com/app/rest/builds/buildType:%28id:bt596%29/statusIcon)](http://teamcity.codebetter.com/viewType.html?buildTypeId=bt596&guest=1)
+
 

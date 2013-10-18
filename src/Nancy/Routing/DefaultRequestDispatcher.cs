@@ -4,6 +4,11 @@ namespace Nancy.Routing
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Threading;
+    using System.Threading.Tasks;
+
+    using Nancy.Helpers;
+
     using Responses.Negotiation;
 
     /// <summary>
@@ -33,47 +38,121 @@ namespace Nancy.Routing
         /// Dispatches a requests.
         /// </summary>
         /// <param name="context">The <see cref="NancyContext"/> for the current request.</param>
-        public void Dispatch(NancyContext context)
+        public Task<Response> Dispatch(NancyContext context, CancellationToken cancellationToken)
         {
+            // TODO - May need to make this run off context rather than response .. seems a bit icky currently
+            var tcs = new TaskCompletionSource<Response>();
+
             var resolveResult = this.Resolve(context);
 
-            context.Parameters = resolveResult.Item2;
-            var resolveResultPreReq = resolveResult.Item3;
-            var resolveResultPostReq = resolveResult.Item4;
-            ExecuteRoutePreReq(context, resolveResultPreReq);
+            context.Parameters = resolveResult.Parameters;
+            context.ResolvedRoute = resolveResult.Route;
 
-            if (context.Response == null)
-            {
-                context.Response = this.routeInvoker.Invoke(resolveResult.Item1, resolveResult.Item2, context);
-            }
+            var preReqTask = ExecuteRoutePreReq(context, cancellationToken, resolveResult.Before);
 
-            if (context.Request.Method.ToUpperInvariant() == "HEAD")
-            {
-                context.Response = new HeadResponse(context.Response);
-            }
+            preReqTask.WhenCompleted(
+                completedTask =>
+                    {
+                        context.Response = completedTask.Result;
 
-            if (resolveResultPostReq != null)
-            {
-                resolveResultPostReq.Invoke(context);
-            }
+                        if (context.Response == null)
+                        {
+                            var routeTask = this.routeInvoker.Invoke(resolveResult.Route, cancellationToken, resolveResult.Parameters, context);
+
+                            routeTask.WhenCompleted(
+                                completedRouteTask =>
+                                    {
+                                        context.Response = completedRouteTask.Result;
+
+                                        if (context.Request.Method.ToUpperInvariant() == "HEAD")
+                                        {
+                                            context.Response = new HeadResponse(context.Response);
+                                        }
+
+                                        ExecutePost(context, cancellationToken, resolveResult.After, resolveResult.OnError, tcs);
+                                    },
+                                HandleFaultedTask(context, resolveResult.OnError, tcs));
+                            
+                            return;
+                        }
+
+                        ExecutePost(context, cancellationToken, resolveResult.After, resolveResult.OnError, tcs);
+                    },
+                HandleFaultedTask(context, resolveResult.OnError, tcs));
+
+            return tcs.Task;
         }
 
-        private static void ExecuteRoutePreReq(NancyContext context, Func<NancyContext, Response> resolveResultPreReq)
+        private static void ExecutePost(NancyContext context, CancellationToken cancellationToken, AfterPipeline postHook, Func<NancyContext, Exception, Response> onError, TaskCompletionSource<Response> tcs)
         {
-            if (resolveResultPreReq == null)
+            if (postHook == null)
             {
+                tcs.SetResult(context.Response);
                 return;
             }
 
-            var resolveResultPreReqResponse = resolveResultPreReq.Invoke(context);
+            postHook.Invoke(context, cancellationToken).WhenCompleted(
+                completedTask => tcs.SetResult(context.Response),
+                completedTask => HandlePostHookFaultedTask(context, onError, completedTask, tcs),
+                false);
+        }
 
-            if (resolveResultPreReqResponse != null)
+        private static void HandlePostHookFaultedTask(NancyContext context, Func<NancyContext, Exception, Response> onError, Task completedTask, TaskCompletionSource<Response> tcs)
+        {
+            var response = ResolveErrorResult(context, onError, completedTask.Exception);
+
+            if (response != null)
             {
-                context.Response = resolveResultPreReqResponse;
+                context.Response = response;
+
+                tcs.SetResult(response);
+            }
+            else
+            {
+                tcs.SetException(completedTask.Exception);
             }
         }
 
-        private Tuple<Route, DynamicDictionary, Func<NancyContext, Response>, Action<NancyContext>> Resolve(NancyContext context)
+        private static Action<Task<Response>> HandleFaultedTask(NancyContext context, Func<NancyContext, Exception, Response> onError, TaskCompletionSource<Response> tcs)
+        {
+            return task =>
+            {
+                var response = ResolveErrorResult(context, onError, task.Exception);
+    
+                if (response != null)
+                {
+                    context.Response = response;
+
+                    tcs.SetResult(response);
+                }
+                else
+                {
+                    tcs.SetException(task.Exception);
+                }
+            };
+        }
+
+        private static Task<Response> ExecuteRoutePreReq(NancyContext context, CancellationToken cancellationToken, BeforePipeline resolveResultPreReq)
+        {
+            if (resolveResultPreReq == null)
+            {
+                return TaskHelpers.GetCompletedTask<Response>(null);
+            }
+
+            return resolveResultPreReq.Invoke(context, cancellationToken);
+        }
+
+        private static Response ResolveErrorResult(NancyContext context, Func<NancyContext, Exception, Response> resolveResultOnError, Exception exception)
+        {
+            if (resolveResultOnError != null)
+            {
+                return resolveResultOnError.Invoke(context, exception);
+            }
+
+            return null;
+        }
+
+        private ResolveResult Resolve(NancyContext context)
         {
             var extension =
                 Path.GetExtension(context.Request.Path);
@@ -97,7 +176,7 @@ namespace Nancy.Routing
                     var match =
                         this.InvokeRouteResolver(context, modifiedRequestPath, newMediaRanges);
 
-                    if (!(match.Item1 is NotFoundRoute))
+                    if (!(match.Route is NotFoundRoute))
                     {
                         return match;
                     }
@@ -117,7 +196,7 @@ namespace Nancy.Routing
                 .Distinct();
         }
 
-        private Tuple<Route, DynamicDictionary, Func<NancyContext, Response>, Action<NancyContext>> InvokeRouteResolver(NancyContext context, string path, IEnumerable<Tuple<string, decimal>> acceptHeaders)
+        private ResolveResult InvokeRouteResolver(NancyContext context, string path, IEnumerable<Tuple<string, decimal>> acceptHeaders)
         {
             context.Request.Headers.Accept = acceptHeaders.ToList();
             context.Request.Url.Path = path;

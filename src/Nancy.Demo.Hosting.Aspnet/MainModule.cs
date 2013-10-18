@@ -1,7 +1,9 @@
 namespace Nancy.Demo.Hosting.Aspnet
 {
     using System;
+    using System.IO;
     using System.Linq;
+    using IO;
     using Nancy.Demo.Hosting.Aspnet.Models;
     using Nancy.Routing;
     using Security;
@@ -20,6 +22,11 @@ namespace Nancy.Demo.Hosting.Aspnet
                     .WithMediaRangeModel("text/html", new RatPack {FirstName = "Nancy fancy pants"})
                     .WithView("negotiatedview")
                     .WithHeader("X-Custom", "SomeValue");
+            };
+
+            Get["/user/{name}"] = parameters =>
+            {
+                return (string)parameters.name;
             };
 
             Get["/filtered", r => true] = x => {
@@ -86,6 +93,8 @@ namespace Nancy.Demo.Hosting.Aspnet
                 return View["razor-strong.vbhtml", new RatPack { FirstName = "Frank" }];
             };
 
+            Get["/razor2"] = _ => new Razor2();
+
             Get["/ssve"] = x =>
             {
                 var model = new RatPack { FirstName = "You" };
@@ -109,12 +118,12 @@ namespace Nancy.Demo.Hosting.Aspnet
 
             Get["/json"] = x => {
                 var model = new RatPack { FirstName = "Andy" };
-                return Response.AsJson(model);
+                return this.Response.AsJson(model);
             };
 
             Get["/xml"] = x => {
                 var model = new RatPack { FirstName = "Andy" };
-                return Response.AsXml(model);
+                return this.Response.AsXml(model);
             };
 
             Get["/session"] = x => {
@@ -156,7 +165,7 @@ namespace Nancy.Demo.Hosting.Aspnet
             {
                 this.ValidateCsrfToken();
 
-                return string.Format("Hello {0}!", Request.Form.Name);
+                return string.Format("Hello {0}!", this.Request.Form.Name);
             };
 
             Get["/csrfWithExpiry"] = x =>
@@ -171,7 +180,7 @@ namespace Nancy.Demo.Hosting.Aspnet
                 {
                     this.ValidateCsrfToken(TimeSpan.FromSeconds(20));
 
-                    return string.Format("Hello {0}!", Request.Form.Name);
+                    return string.Format("Hello {0}!", this.Request.Form.Name);
                 };
 
             Get["/viewNotFound"] = _ => View["I-do-not-exist"];

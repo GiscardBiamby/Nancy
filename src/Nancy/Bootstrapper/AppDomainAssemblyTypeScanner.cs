@@ -15,7 +15,7 @@ namespace Nancy.Bootstrapper
     {
         static AppDomainAssemblyTypeScanner()
         {
-            LoadNancyAssemblies();
+            LoadAssembliesWithNancyReferences();
         }
 
         /// <summary>
@@ -34,28 +34,44 @@ namespace Nancy.Bootstrapper
         private static IEnumerable<Assembly> assemblies;
 
         /// <summary>
-        /// Indicates whether the nancy assemblies have already been loaded
+        /// Indicates whether the all Assemblies, that references a Nancy assembly, have already been loaded
         /// </summary>
-        private static bool nancyAssembliesLoaded;
+        private static bool nancyReferencingAssembliesLoaded;
+
+        private static IEnumerable<Func<Assembly, bool>> assembliesToScan;
 
         /// <summary>
-        /// 
+        /// The default assemblies for scanning.
+        /// Includes the nancy assembly and anything referencing a nancy assembly
         /// </summary>
-        private static IEnumerable<Func<Assembly, bool>> ignoredAssemblies;
+        public static Func<Assembly, bool>[] DefaultAssembliesToScan = new Func<Assembly, bool>[]
+        {
+            x => x == nancyAssembly,
+            x =>
+            {
+                return !x.GetName().Name.StartsWith("Nancy.Testing",StringComparison.OrdinalIgnoreCase) &&
+                    x.GetReferencedAssemblies().Any(r => r.Name.StartsWith("Nancy", StringComparison.OrdinalIgnoreCase));
+            }
+        };
 
         /// <summary>
-        /// Gets or sets a set of rules for ignoring assemblies while scanning through them.
+        /// Gets or sets a set of rules for which assemblies are scanned
+        /// Defaults to just assemblies that have references to nancy, and nancy
+        /// itself.
+        /// Each item in the enumerable is a delegate that takes the assembly and 
+        /// returns true if it is to be included. Returning false doesn't mean it won't
+        /// be included as a true from another delegate will take precedence.
         /// </summary>
-        public static IEnumerable<Func<Assembly, bool>> IgnoredAssemblies 
-        { 
-            private get 
+        public static IEnumerable<Func<Assembly, bool>> AssembliesToScan
+        {
+            private get
             {
-                return ignoredAssemblies;
-            } 
-            set 
+                return assembliesToScan ?? (assembliesToScan = DefaultAssembliesToScan);
+            }
+            set
             {
-                ignoredAssemblies = value;
-                UpdateTypes ();
+                assembliesToScan = value;
+                UpdateTypes();
             }
         }
 
@@ -82,13 +98,64 @@ namespace Nancy.Bootstrapper
         }
 
         /// <summary>
+        /// Add assemblies to the list of assemblies to scan for Nancy types
+        /// </summary>
+        /// <param name="assemblyNames">One or more assembly names</param>
+        public static void AddAssembliesToScan(params string[] assemblyNames)
+        {
+            var normalisedNames = GetNormalisedAssemblyNames(assemblyNames).ToArray();
+
+            foreach (var assemblyName in normalisedNames)
+            {
+                LoadAssemblies(assemblyName + ".dll");
+                LoadAssemblies(assemblyName + ".exe");
+            }
+
+            var scanningPredicates = normalisedNames.Select(s =>
+                {
+                    return (Func<Assembly, bool>)(a => a.GetName().Name == s);
+                });
+
+            AssembliesToScan = AssembliesToScan.Union(scanningPredicates);
+        }
+
+        /// <summary>
+        /// Add assemblies to the list of assemblies to scan for Nancy types
+        /// </summary>
+        /// <param name="assemblies">One of more assemblies</param>
+        public static void AddAssembliesToScan(params Assembly[] assemblies)
+        {
+            foreach (var assembly in assemblies)
+            {
+                LoadAssemblies(assembly.GetName() + ".dll");
+                LoadAssemblies(assembly.GetName() + ".exe");
+            }
+
+            var scanningPredicates = assemblies.Select(an => (Func<Assembly, bool>)(a => a == an));
+
+            AssembliesToScan = AssembliesToScan.Union(scanningPredicates);
+        }
+
+        /// <summary>
+        /// Add predicates for determining which assemblies to scan for Nancy types
+        /// </summary>
+        /// <param name="predicates">One or more predicates</param>
+        public static void AddAssembliesToScan(params Func<Assembly, bool>[] predicates)
+        {
+            AssembliesToScan = AssembliesToScan.Union(predicates);
+        }
+
+        /// <summary>
         /// Load assemblies from a the app domain base directory matching a given wildcard.
         /// Assemblies will only be loaded if they aren't already in the appdomain.
         /// </summary>
         /// <param name="wildcardFilename">Wildcard to match the assemblies to load</param>
         public static void LoadAssemblies(string wildcardFilename)
         {
-            LoadAssemblies(AppDomain.CurrentDomain.BaseDirectory, wildcardFilename);
+            foreach (var directory in GetAssemblyDirectories())
+            {
+                LoadAssemblies(directory, wildcardFilename);
+            }
         }
 
         /// <summary>
@@ -105,7 +172,8 @@ namespace Nancy.Bootstrapper
 
             var unloadedAssemblies =
                 Directory.GetFiles(containingDirectory, wildcardFilename).Where(
-                    f => !existingAssemblyPaths.Contains(f, StringComparer.InvariantCultureIgnoreCase));
+                    f => !existingAssemblyPaths.Contains(f, StringComparer.InvariantCultureIgnoreCase)).ToArray();
+
 
             foreach (var unloadedAssembly in unloadedAssemblies)
             {
@@ -135,25 +203,65 @@ namespace Nancy.Bootstrapper
         private static void UpdateAssemblies()
         {
             assemblies = (from assembly in AppDomain.CurrentDomain.GetAssemblies()
-                          where IgnoredAssemblies != null ? !IgnoredAssemblies.Any(asm => asm(assembly)) : true
+                          where AssembliesToScan.Any(asm => asm(assembly))
                           where !assembly.IsDynamic
                           where !assembly.ReflectionOnly
                           select assembly).ToArray();
         }
 
         /// <summary>
-        /// Loads any Nancy*.dll assemblies in the app domain base directory
+        /// Loads any assembly that references a Nancy assembly.
         /// </summary>
-        public static void LoadNancyAssemblies()
+        public static void LoadAssembliesWithNancyReferences()
         {
-            if (nancyAssembliesLoaded)
+            if (nancyReferencingAssembliesLoaded)
             {
                 return;
             }
 
-            LoadAssemblies(@"Nancy*.dll");
+            UpdateAssemblies();
 
-            nancyAssembliesLoaded = true;
+            var existingAssemblyPaths =
+                assemblies.Select(a => a.Location).ToArray();
+
+            foreach (var directory in GetAssemblyDirectories())
+            {
+                var unloadedAssemblies = Directory
+                    .GetFiles(directory, "*.dll")
+                    .Where(f => !existingAssemblyPaths.Contains(f, StringComparer.InvariantCultureIgnoreCase)).ToArray();
+
+                foreach (var unloadedAssembly in unloadedAssemblies)
+                {
+                    Assembly inspectedAssembly = null;
+                    try
+                    {
+                        inspectedAssembly = Assembly.ReflectionOnlyLoadFrom(unloadedAssembly);
+                    }
+                    catch (BadImageFormatException biEx)
+                    {
+                        //the assembly maybe it's not managed code
+                    }
+
+                    if (inspectedAssembly != null && inspectedAssembly.GetReferencedAssemblies().Any(r => r.Name.StartsWith("Nancy", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        try
+                        {
+                            Assembly.Load(inspectedAssembly.GetName());
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+
+
+            UpdateTypes();
+
+           
+            UpdateTypes();
+
+            nancyReferencingAssembliesLoaded = true;
         }
 
         /// <summary>
@@ -162,6 +270,7 @@ namespace Nancy.Bootstrapper
         /// <typeparam name="TType">Type to search for</typeparam>
         /// <param name="excludeInternalTypes">Whether to exclude types inside the core Nancy assembly</param>
         /// <returns>IEnumerable of types</returns>
+        [Obsolete("This method has been replaced by the overload that accepts a ScanMode parameter and will be removed in a subsequent release.")]
         public static IEnumerable<Type> TypesOf<TType>(bool excludeInternalTypes = false)
         {
             var returnTypes = Types.Where(t => typeof(TType).IsAssignableFrom(t));
@@ -172,6 +281,99 @@ namespace Nancy.Bootstrapper
             }
 
             return returnTypes;
+        }
+
+        /// <summary>
+        /// Gets all types implementing a particular interface/base class
+        /// </summary>
+        /// <param name="type">Type to search for</param>
+        /// <returns>An <see cref="IEnumerable{T}"/> of types.</returns>
+        /// <remarks>Will scan with <see cref="ScanMode.All"/>.</remarks>
+        public static IEnumerable<Type> TypesOf(Type type)
+        {
+            return TypesOf(type, ScanMode.All);
+        }
+
+        /// <summary>
+        /// Gets all types implementing a particular interface/base class
+        /// </summary>
+        /// <param name="type">Type to search for</param>
+        /// <param name="mode">A <see cref="ScanMode"/> value to determin which type set to scan in.</param>
+        /// <returns>An <see cref="IEnumerable{T}"/> of types.</returns>
+        public static IEnumerable<Type> TypesOf(Type type, ScanMode mode)
+        {
+            var returnTypes =
+                Types.Where(type.IsAssignableFrom);
+
+            if (mode == ScanMode.All)
+            {
+                return returnTypes;
+            }
+
+            return (mode == ScanMode.OnlyNancy) ?
+                returnTypes.Where(t => t.Assembly == nancyAssembly) :
+                returnTypes.Where(t => t.Assembly != nancyAssembly);
+        }
+
+        /// <summary>
+        /// Gets all types implementing a particular interface/base class
+        /// </summary>
+        /// <typeparam name="TType">Type to search for</typeparam>
+        /// <returns>An <see cref="IEnumerable{T}"/> of types.</returns>
+        /// <remarks>Will scan with <see cref="ScanMode.All"/>.</remarks>
+        public static IEnumerable<Type> TypesOf<TType>()
+        {
+            return TypesOf<TType>(ScanMode.All);
+        }
+
+        /// <summary>
+        /// Gets all types implementing a particular interface/base class
+        /// </summary>
+        /// <typeparam name="TType">Type to search for</typeparam>
+        /// <param name="mode">A <see cref="ScanMode"/> value to determin which type set to scan in.</param>
+        /// <returns>An <see cref="IEnumerable{T}"/> of types.</returns>
+        public static IEnumerable<Type> TypesOf<TType>(ScanMode mode)
+        {
+            return TypesOf(typeof(TType), mode);
+        }
+
+        /// <summary>
+        /// Returns the directories containing dll files. It uses the default convention as stated by microsoft.
+        /// </summary>
+        /// <see cref="http://msdn.microsoft.com/en-us/library/system.appdomainsetup.privatebinpathprobe.aspx"/>
+        private static IEnumerable<string> GetAssemblyDirectories()
+        {
+            var privateBinPathDirectories = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath == null
+                                                ? new string[] { }
+                                                : AppDomain.CurrentDomain.SetupInformation.PrivateBinPath.Split(';');
+
+            foreach (var privateBinPathDirectory in privateBinPathDirectories)
+            {
+                if (!string.IsNullOrWhiteSpace(privateBinPathDirectory))
+                {
+                    yield return privateBinPathDirectory;
+                }
+            }
+
+            if (AppDomain.CurrentDomain.SetupInformation.PrivateBinPathProbe == null)
+            {
+                yield return AppDomain.CurrentDomain.SetupInformation.ApplicationBase;
+            }
+        }
+
+        private static IEnumerable<string> GetNormalisedAssemblyNames(string[] assemblyNames)
+        {
+            foreach (var assemblyName in assemblyNames)
+            {
+                if (assemblyName.EndsWith(".dll") || assemblyName.EndsWith(".exe"))
+                {
+                    yield return Path.GetFileNameWithoutExtension(assemblyName);
+                }
+                else
+                {
+                    yield return assemblyName;
+                }
+            }
         }
     }
 

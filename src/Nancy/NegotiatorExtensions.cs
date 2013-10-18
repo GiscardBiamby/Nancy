@@ -1,12 +1,41 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Nancy.Responses.Negotiation;
-
-namespace Nancy
+﻿namespace Nancy
 {
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using Nancy.Responses.Negotiation;
+    using Cookies;
+
     public static class NegotiatorExtensions
     {
+        /// <summary>
+        /// Add a cookie to the response.
+        /// </summary>
+        /// <param name="negotiator">The <see cref="Negotiator"/> instance.</param>
+        /// <param name="cookie">The <see cref="INancyCookie"/> instance that should be added.</param>
+        /// <returns>The modified <see cref="Negotiator"/> instance.</returns>
+        public static Negotiator WithCookie(this Negotiator negotiator, INancyCookie cookie)
+        {
+            negotiator.NegotiationContext.Cookies.Add(cookie);
+            return negotiator;
+        }
+
+        /// <summary>
+        /// Add a collection of cookies to the response.
+        /// </summary>
+        /// <param name="negotiator">The <see cref="Negotiator"/> instance.</param>
+        /// <param name="cookies">The <see cref="INancyCookie"/> instances that should be added.</param>
+        /// <returns>The modified <see cref="Negotiator"/> instance.</returns>
+        public static Negotiator WithCookies(this Negotiator negotiator, IEnumerable<INancyCookie> cookies)
+        {
+            foreach (var cookie in cookies)
+            {
+                negotiator.WithCookie(cookie);
+            }
+            
+            return negotiator;
+        }
+
         /// <summary>
         /// Add a header to the response
         /// </summary>
@@ -19,6 +48,16 @@ namespace Nancy
             return negotiator.WithHeaders(new { Header = header, Value = value });
         }
 
+        /// <summary>
+        /// Add a content type to the response
+        /// </summary>
+        /// <param name="negotiator">Negotiator object</param>
+        /// <param name="contentType">Content type value</param>
+        /// <returns>Modified negotiator</returns>
+        public static Negotiator WithContentType(this Negotiator negotiator, string contentType)
+        {
+          return negotiator.WithHeaders(new { Header = "Content-Type", Value = contentType });
+        }
         /// <summary>
         /// Adds headers to the response using anonymous types
         /// </summary>
@@ -140,6 +179,30 @@ namespace Nancy
             negotiator.NegotiationContext.PermissableMediaRanges.Add(range);
             negotiator.NegotiationContext.MediaRangeModelMappings.Add(range, modelFactory);
 
+            return negotiator;
+        }
+
+        /// <summary>
+        /// Sets the status code that should be assigned to the final response.
+        /// </summary>
+        /// <param name="negotiator">Negotiator object</param>
+        /// <param name="statusCode">The status code that should be used.</param>
+        /// <returns>Updated negotiator object</returns>
+        public static Negotiator WithStatusCode(this Negotiator negotiator, int statusCode)
+        {
+            negotiator.NegotiationContext.StatusCode = (HttpStatusCode)statusCode;
+            return negotiator;
+        }
+
+        /// <summary>
+        /// Sets the status code that should be assigned to the final response.
+        /// </summary>
+        /// <param name="negotiator">Negotiator object</param>
+        /// <param name="statusCode">The status code that should be used.</param>
+        /// <returns>Updated negotiator object</returns>
+        public static Negotiator WithStatusCode(this Negotiator negotiator, HttpStatusCode statusCode)
+        {
+            negotiator.NegotiationContext.StatusCode = statusCode;
             return negotiator;
         }
 

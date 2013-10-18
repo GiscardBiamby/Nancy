@@ -1,15 +1,16 @@
 ﻿namespace Nancy.ViewEngines.Razor.VisualBasic
 {
+    using System;
     using System.CodeDom.Compiler;
     using System.Collections.Generic;
     using System.Web.Razor;
-
+    using System.Web.Razor.Generator;
     using Microsoft.VisualBasic;
 
     /// <summary>
     /// Renderer for Visual Basic razor files.
     /// </summary>
-    public class VisualBasicRazorViewRenderer : IRazorViewRenderer
+    public class VisualBasicRazorViewRenderer : IRazorViewRenderer, IDisposable
     {
         /// <summary>
         /// Gets the assemblies.
@@ -23,6 +24,11 @@
         {
             get { return "vbhtml"; }
         }
+
+        /// <summary>
+        /// Gets the <see cref="SetBaseTypeCodeGenerator"/> that should be used with the renderer.
+        /// </summary>
+        public Type ModelCodeGenerator { get; private set; }
 
         /// <summary>
         /// Gets the host.
@@ -39,6 +45,8 @@
         /// </summary>
         public VisualBasicRazorViewRenderer()
         {
+            this.ModelCodeGenerator = typeof(VisualBasicModelCodeGenerator);
+
             this.Assemblies = new List<string>();
 
             this.Provider = new VBCodeProvider();
@@ -46,5 +54,16 @@
             this.Host = new NancyRazorEngineHost(new VBRazorCodeLanguage());
         }
 
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        /// <filterpriority>2</filterpriority>
+        public void Dispose()
+        {
+            if (this.Provider != null)
+            {
+                this.Provider.Dispose();
+            }
+        }
     }
 }

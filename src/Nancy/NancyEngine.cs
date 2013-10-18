@@ -4,12 +4,16 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading;
+    using System.Threading.Tasks;
+
     using Bootstrapper;
 
     using Nancy.Cookies;
     using Nancy.Diagnostics;
     using Nancy.ErrorHandling;
     using Nancy.Routing;
+
+    using Nancy.Helpers;
 
     /// <summary>
     /// Default engine for handling Nancy <see cref="Request"/>s.
@@ -22,16 +26,20 @@
         private readonly IRequestDispatcher dispatcher;
         private readonly INancyContextFactory contextFactory;
         private readonly IRequestTracing requestTracing;
-        private readonly IEnumerable<IErrorHandler> errorHandlers;
+        private readonly DiagnosticsConfiguration diagnosticsConfiguration;
+        private readonly IEnumerable<IStatusCodeHandler> statusCodeHandlers;
+        private readonly IStaticContentProvider staticContentProvider;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="NancyEngine"/> class.
         /// </summary>
         /// <param name="dispatcher">An <see cref="IRouteResolver"/> instance that will be used to resolve a route, from the modules, that matches the incoming <see cref="Request"/>.</param>
         /// <param name="contextFactory">A factory for creating contexts</param>
-        /// <param name="errorHandlers">Error handlers</param>
+        /// <param name="statusCodeHandlers">Error handlers</param>
         /// <param name="requestTracing">The request tracing instance.</param>
-        public NancyEngine(IRequestDispatcher dispatcher, INancyContextFactory contextFactory, IEnumerable<IErrorHandler> errorHandlers, IRequestTracing requestTracing)
+        /// <param name="diagnosticsConfiguration"></param>
+        /// <param name="staticContentProvider">The provider to use for serving static content</param>
+        public NancyEngine(IRequestDispatcher dispatcher, INancyContextFactory contextFactory, IEnumerable<IStatusCodeHandler> statusCodeHandlers, IRequestTracing requestTracing, DiagnosticsConfiguration diagnosticsConfiguration, IStaticContentProvider staticContentProvider)
         {
             if (dispatcher == null)
             {
@@ -43,15 +51,17 @@
                 throw new ArgumentNullException("contextFactory");
             }
 
-            if (errorHandlers == null)
+            if (statusCodeHandlers == null)
             {
-                throw new ArgumentNullException("errorHandlers");
+                throw new ArgumentNullException("statusCodeHandlers");
             }
 
             this.dispatcher = dispatcher;
             this.contextFactory = contextFactory;
-            this.errorHandlers = errorHandlers;
+            this.statusCodeHandlers = statusCodeHandlers;
             this.requestTracing = requestTracing;
+            this.diagnosticsConfiguration = diagnosticsConfiguration;
+            this.staticContentProvider = staticContentProvider;
         }
 
         /// <summary>
@@ -67,24 +77,104 @@
         /// <returns>A <see cref="NancyContext"/> instance containing the request/response context.</returns>
         public NancyContext HandleRequest(Request request)
         {
+            return this.HandleRequest(request, context => context);
+        }
+
+        /// <summary>
+        /// Handles an incoming <see cref="Request"/> async.
+        /// </summary>
+        /// <param name="request">An <see cref="Request"/> instance, containing the information about the current request.</param>
+        /// <param name="onComplete">Delegate to call when the request is complete</param>
+        /// <param name="onError">Deletate to call when any errors occur</param>
+        public void HandleRequest(Request request, Action<NancyContext> onComplete, Action<Exception> onError)
+        {
+            this.HandleRequest(request, null, onComplete, onError);
+        }
+
+        /// <summary>
+        /// Handles an incoming <see cref="Request"/>.
+        /// </summary>
+        /// <param name="request">An <see cref="Request"/> instance, containing the information about the current request.</param>
+        /// <param name="preRequest">Delegate to call before the request is processed</param>
+        /// <returns>A <see cref="NancyContext"/> instance containing the request/response context.</returns>
+        private NancyContext HandleRequest(Request request, Func<NancyContext, NancyContext> preRequest)
+        {
+            var task = this.HandleRequestInternal(request, preRequest);
+
+            task.Wait();
+
+            if (task.IsFaulted)
+            {
+                throw task.Exception ?? new Exception("Request task faulted");
+            }
+
+            return task.Result;
+        }
+
+        /// <summary>
+        /// Handles an incoming <see cref="Request"/> async.
+        /// </summary>
+        /// <param name="request">An <see cref="Request"/> instance, containing the information about the current request.</param>
+        /// <param name="preRequest">Pre request hook from the host</param>
+        /// <param name="onComplete">Delegate to call when the request is complete</param>
+        /// <param name="onError">Deletate to call when any errors occur</param>
+        public void HandleRequest(Request request, Func<NancyContext, NancyContext> preRequest, Action<NancyContext> onComplete, Action<Exception> onError)
+        {
+            this.HandleRequestInternal(request, preRequest)
+                .WhenCompleted(t => onComplete(t.Result), t => onError(t.Exception));
+        }
+
+        private Task<NancyContext> HandleRequestInternal(Request request, Func<NancyContext, NancyContext> preRequest)
+        {
+            // TODO - replace continuations with a fast continue from the pipeline spike
+
+            var tcs = new TaskCompletionSource<NancyContext>();
+
             if (request == null)
             {
                 throw new ArgumentNullException("request", "The request parameter cannot be null.");
             }
 
-            var context = this.contextFactory.Create();
-            context.Request = request;
+            var context = this.contextFactory.Create(request);
+
+            if (preRequest != null)
+            {
+                context = preRequest(context);
+            }
+
+            var staticContentResponse = this.staticContentProvider.GetContent(context);
+            if (staticContentResponse != null)
+            {
+                context.Response = staticContentResponse;
+                tcs.SetResult(context);
+                return tcs.Task;
+            }
 
             var pipelines =
                 this.RequestPipelinesFactory.Invoke(context);
 
-            this.InvokeRequestLifeCycle(context, pipelines);
+            // TODO - potentially get this passed in so requests can be cancelled
+            var cancellationToken = new CancellationToken();
+            context.Items["CANCELLATION_TOKEN"] = cancellationToken; // So we get disposed when the request is complete
 
-            CheckErrorHandler(context);
+            var task = this.InvokeRequestLifeCycle(context, cancellationToken, pipelines);
 
-            this.SaveTraceInformation(context);
+            task.WhenCompleted(
+                completeTask =>
+                {
+                    this.CheckStatusCodeHandler(completeTask.Result);
 
-            return context;
+                    this.SaveTraceInformation(completeTask.Result);
+
+                    tcs.SetResult(completeTask.Result);
+                },
+                errorTask =>
+                {
+                    tcs.SetException(errorTask.Exception);
+                },
+                true);
+
+            return tcs.Task;
         }
 
         private void SaveTraceInformation(NancyContext ctx)
@@ -116,7 +206,7 @@
         private bool EnableTracing(NancyContext ctx)
         {
             return StaticConfiguration.EnableRequestTracing &&
-                   !ctx.Request.Path.StartsWith(DiagnosticsHook.ControlPanelPrefix);
+                   !ctx.Items.ContainsKey(DiagnosticsHook.ItemsKey);
         }
 
         private Guid GetDiagnosticsSessionGuid(NancyContext ctx)
@@ -147,76 +237,80 @@
             ctx.Response.AddCookie(cookie);
         }
 
-        /// <summary>
-        /// Handles an incoming <see cref="Request"/> async.
-        /// </summary>
-        /// <param name="request">An <see cref="Request"/> instance, containing the information about the current request.</param>
-        /// <param name="onComplete">Delegate to call when the request is complete</param>
-        /// <param name="onError">Deletate to call when any errors occur</param>
-        public void HandleRequest(Request request, Action<NancyContext> onComplete, Action<Exception> onError)
-        {
-            // TODO - potentially do some things sync like the pre-req hooks?
-            // Possibly not worth it as the thread pool is quite clever
-            // when it comes to fast running tasks such as ones where the prehook returns a redirect.
-            ThreadPool.QueueUserWorkItem(s =>
-                {
-                    try
-                    {
-                        onComplete.Invoke(this.HandleRequest(request));
-                    }
-                    catch (Exception e)
-                    {
-                        onError.Invoke(e);
-                    }
-                });
-        }
-
-        private void CheckErrorHandler(NancyContext context)
+        private void CheckStatusCodeHandler(NancyContext context)
         {
             if (context.Response == null)
             {
                 return;
             }
 
-            foreach (var errorHandler in this.errorHandlers.Where(e => e.HandlesStatusCode(context.Response.StatusCode, context)))
+            foreach (var statusCodeHandler in this.statusCodeHandlers)
             {
-                errorHandler.Handle(context.Response.StatusCode, context);
+                if (statusCodeHandler.HandlesStatusCode(context.Response.StatusCode, context))
+                {
+                    statusCodeHandler.Handle(context.Response.StatusCode, context);
+                }
             }
         }
 
-        private void InvokeRequestLifeCycle(NancyContext context, IPipelines pipelines)
+        private Task<NancyContext> InvokeRequestLifeCycle(NancyContext context, CancellationToken cancellationToken, IPipelines pipelines)
         {
-            try
-            {
-                InvokePreRequestHook(context, pipelines.BeforeRequest);
+            var tcs = new TaskCompletionSource<NancyContext>();
 
-                if (context.Response == null) 
-                {
-                    this.dispatcher.Dispatch(context);
-                }
+            var preHookTask = InvokePreRequestHook(context, cancellationToken, pipelines.BeforeRequest);
 
-                if (pipelines.AfterRequest != null) 
+            preHookTask.WhenCompleted(t =>
                 {
-                    pipelines.AfterRequest.Invoke(context);
-                }
-            }
-            catch (Exception ex)
-            {
-                InvokeOnErrorHook(context, pipelines.OnError, ex);
-            }
+                    var dispatchTask = t.Result != null ? TaskHelpers.GetCompletedTask(t.Result) : this.dispatcher.Dispatch(context, cancellationToken);
+
+                    dispatchTask.WhenCompleted(
+                        completedTask =>
+                        {
+                            context.Response = completedTask.Result;
+
+                            var postHookTask = InvokePostRequestHook(context, cancellationToken, pipelines.AfterRequest);
+
+                            postHookTask.WhenCompleted(
+                                completedPostHookTask => tcs.SetResult(context),
+                                HandleFaultedTask(context, pipelines, tcs));
+                        },
+                        HandleFaultedTask(context, pipelines, tcs));
+                },
+                HandleFaultedTask(context, pipelines, tcs));
+
+            return tcs.Task;
         }
 
-        private static void InvokePreRequestHook(NancyContext context, BeforePipeline pipeline)
+        private static Action<Task> HandleFaultedTask(NancyContext context, IPipelines pipelines, TaskCompletionSource<NancyContext> tcs)
         {
-            if (pipeline != null)
-            {
-                var preRequestResponse = pipeline.Invoke(context);
-
-                if (preRequestResponse != null)
+            return t =>
                 {
-                    context.Response = preRequestResponse;
-                }
+                    try
+                    {
+                        InvokeOnErrorHook(context, pipelines.OnError, t.Exception.InnerException);
+
+                        tcs.SetResult(context);
+                    }
+                    catch (Exception e)
+                    {
+                        tcs.SetException(e);
+                    }
+                };
+        }
+
+        private static Task<Response> InvokePreRequestHook(NancyContext context, CancellationToken cancellationToken, BeforePipeline pipeline)
+        {
+            if (pipeline == null)
+            {
+                return TaskHelpers.GetCompletedTask<Response>(null);
             }
+
+            return pipeline.Invoke(context, cancellationToken);
+        }
+
+        private Task InvokePostRequestHook(NancyContext context, CancellationToken cancellationToken, AfterPipeline pipeline)
+        {
+            return pipeline == null ? TaskHelpers.GetCompletedTask() : pipeline.Invoke(context, cancellationToken);
         }
 
         private static void InvokeOnErrorHook(NancyContext context, ErrorPipeline pipeline, Exception ex)
@@ -224,7 +318,7 @@
             try
             {
                 if (pipeline == null)
-                { 
+                {
                     throw new RequestExecutionException(ex);
                 }
 

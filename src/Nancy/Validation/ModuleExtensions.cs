@@ -1,7 +1,7 @@
 ﻿namespace Nancy.Validation
 {
     /// <summary>
-    /// Extensions to <see cref="NancyModule"/> for validation.
+    /// Extensions to <see cref="INancyModule"/> for validation.
     /// </summary>
     public static class ModuleExtensions
     {
@@ -12,14 +12,19 @@
         /// <param name="module">The module that the validation is performed from.</param>
         /// <param name="instance">The instance that is being validated.</param>
         /// <returns>A <see cref="ModelValidationResult"/> instance.</returns>
-        public static ModelValidationResult Validate<T>(this NancyModule module, T instance)
+        public static ModelValidationResult Validate<T>(this INancyModule module, T instance)
         {
             var validator = 
                 module.ValidatorLocator.GetValidatorForType(typeof(T));
 
-            return (validator == null) ? 
-                ModelValidationResult.Valid : 
-                validator.Validate(instance);
+            var result =
+                (validator == null) ?
+                    ModelValidationResult.Valid :
+                    validator.Validate(instance);
+
+            module.ModelValidationResult = result;
+
+            return result;
         }
     }
 }

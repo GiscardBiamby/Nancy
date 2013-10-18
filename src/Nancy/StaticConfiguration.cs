@@ -17,12 +17,13 @@ namespace Nancy
         {
             disableErrorTraces = !(disableCaches = IsRunningDebug);
             CaseSensitive = false;
+            RequestQueryFormMultipartLimit = 1000;
         }
 
         /// <summary>
         /// Gets or sets a value indicating whether Nancy should disable caching
         /// </summary>
-        [Description("Determins if Nancy should disable the internal caches. This will have an impact on performance and should not be used in production.")]
+        [Obsolete("DisableCaches is now obsolete, please see the StaticConfiguration.Caching properties for more finely grained control", true)]
         public static bool DisableCaches
         {
             get
@@ -52,6 +53,12 @@ namespace Nancy
         }
 
         /// <summary>
+        /// Gets or sets a value indicating whether or not to respond with 405 responses
+        /// </summary>
+        [Description("Disables 405 responses from being sent to the client.")]
+        public static bool DisableMethodNotAllowedResponses { get; set; }
+
+        /// <summary>
         /// Gets or sets a value indicating whether or not to enable case sensitivity in query, parameters (DynamicDictionary) and model binding. Enable this to conform with RFC3986.
         /// </summary>
         [Description("Enable case sensitivity in query, parameters (DynamicDictionary) and model binding. Enable this to conform with RFC3986.")]
@@ -62,7 +69,7 @@ namespace Nancy
         /// Checks the entry assembly to see whether it has been built in debug mode.
         /// If anything goes wrong it returns false.
         /// </summary>
-        private static bool IsRunningDebug
+        public static bool IsRunningDebug
         {
             get
             {
@@ -70,22 +77,25 @@ namespace Nancy
             }
         }
 
+        /// <summary>
+        /// Gets or sets the limit on the number of query string variables, form fields,
+        /// or multipart sections in a request.
+        /// </summary>
+        public static int RequestQueryFormMultipartLimit { get; set; }
+
         private static bool GetDebugMode()
         {
             try
             {
-                var assembly = AppDomainAssemblyTypeScanner.TypesOf<NancyModule>(true).FirstOrDefault().Assembly;
+                //Get all non-nancy assemblies, and select the custom attributes
+                var assembliesInDebug
+                    = AppDomainAssemblyTypeScanner.TypesOf<INancyModule>(ScanMode.ExcludeNancy)
+                                                  .Select(x => x.Assembly.GetCustomAttributes(typeof(DebuggableAttribute), true))
+                                                  .Where(x => x.Length != 0);
 
-                var attributes = assembly.GetCustomAttributes(typeof(DebuggableAttribute), true);
-
-                if (attributes.Length == 0)
-                {
-                    return false;
-                }
-
-                var d = (DebuggableAttribute)attributes[0];
-
-                return d.IsJITTrackingEnabled;
+                //if there are any, then return the IsJITTrackingEnabled
+                //else if the collection is empty it returns false
+                return assembliesInDebug.Any(d => ((DebuggableAttribute)d[0]).IsJITTrackingEnabled);
             }
             catch (Exception)
             {
@@ -99,5 +109,46 @@ namespace Nancy
         /// </summary>
         [Description("Enable request tracing.")]
         public static bool EnableRequestTracing { get; set; }
+
+        public static class Caching
+        {
+            private static bool? enableRuntimeViewDiscovery;
+
+            private static bool? enableRuntimeViewUpdates;
+
+            /// <summary>
+            /// Gets or sets a value indicating whether or not to enable runtime view discovery
+            /// Defaults to True in debug mode and False in release mode
+            /// </summary>
+            [Description("Enable runtime discovery of new views.")]
+            public static bool EnableRuntimeViewDiscovery
+            {
+                get
+                {
+                    return enableRuntimeViewDiscovery ?? (bool)(enableRuntimeViewDiscovery = IsRunningDebug);
+                }
+                set
+                {
+                    enableRuntimeViewDiscovery = value;
+                }
+            }
+
+            /// <summary>
+            /// Gets or sets a value indicating whether or not to allow runtime changes of views
+            /// Defaults to True in debug mode and False in release mode
+            /// </summary>
+            [Description("Enable runtime updating of view templates.")]
+            public static bool EnableRuntimeViewUpdates
+            {
+                get
+                {
+                    return enableRuntimeViewUpdates ?? (bool)(enableRuntimeViewUpdates = IsRunningDebug);
+                }
+                set
+                {
+                    enableRuntimeViewUpdates = value;
+                }
+            }
+        }
     }
 }

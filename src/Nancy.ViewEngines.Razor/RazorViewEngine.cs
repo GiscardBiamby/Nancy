@@ -10,18 +10,18 @@
     using System.Text;
     using System.Web.Razor;
     using System.Web.Razor.Parser.SyntaxTree;
-    using System.Web.Razor.Text;
-
     using Nancy.Bootstrapper;
+    using Nancy.Helpers;
     using Nancy.Responses;
 
     /// <summary>
     /// View engine for rendering razor views.
     /// </summary>
-    public class RazorViewEngine : IViewEngine
+    public class RazorViewEngine : IViewEngine, IDisposable
     {
         private readonly IRazorConfiguration razorConfiguration;
         private readonly IEnumerable<IRazorViewRenderer> viewRenderers;
+        private readonly object compileLock = new object();
 
         /// <summary>
         /// Gets the extensions file extensions that are supported by the view engine.
@@ -46,6 +46,11 @@
             };
 
             this.razorConfiguration = configuration;
+
+            foreach (var renderer in this.viewRenderers)
+            {
+                this.AddDefaultNameSpaces(renderer.Host);
+            }
         }
 
         /// <summary>
@@ -80,23 +85,39 @@
 
             response.Contents = stream =>
             {
-                var writer = new StreamWriter(stream);
-                var view = this.GetViewInstance(viewLocationResult, renderContext, referencingAssembly, model);
+                var writer = 
+                    new StreamWriter(stream);
+
+                var view = 
+                    this.GetViewInstance(viewLocationResult, renderContext, referencingAssembly, model);
+
                 view.ExecuteView(null, null);
+
                 var body = view.Body;
                 var sectionContents = view.SectionContents;
-                var root = !view.HasLayout;
-                var layout = view.Layout;
+
+                var layout = view.HasLayout ? 
+                    view.Layout :
+                    GetViewStartLayout(model, renderContext, referencingAssembly);
+
+                var root = 
+                    string.IsNullOrWhiteSpace(layout);
 
                 while (!root)
                 {
-                    view = this.GetViewInstance(renderContext.LocateView(layout, model), renderContext, referencingAssembly, model);
+                    view = 
+                        this.GetViewInstance(renderContext.LocateView(layout, model), renderContext, referencingAssembly, model);
+
                     view.ExecuteView(body, sectionContents);
 
                     body = view.Body;
                     sectionContents = view.SectionContents;
+
+                    layout = view.HasLayout ?
+                        view.Layout :
+                        GetViewStartLayout(model, renderContext, referencingAssembly);
+
                     root = !view.HasLayout;
-                    layout = view.Layout;
                 }
 
                 writer.Write(body);
@@ -106,7 +127,30 @@
             return response;
         }
 
-        private RazorTemplateEngine GetRazorTemplateEngine(RazorEngineHost engineHost)
+        private string GetViewStartLayout(dynamic model, IRenderContext renderContext, Assembly referencingAssembly)
+        {
+            var view =
+                renderContext.LocateView("_ViewStart", model);
+
+            if (view == null)
+            {
+                return string.Empty;
+            }
+
+            if (!this.Extensions.Any(x => x.Equals(view.Extension, StringComparison.OrdinalIgnoreCase)))
+            {
+                return string.Empty;
+            }
+
+            var viewInstance =
+                GetViewInstance(view, renderContext, referencingAssembly, model);
+
+            viewInstance.ExecuteView(null, null);
+
+            return viewInstance.Layout ?? string.Empty;
+        }
+
+        private void AddDefaultNameSpaces(RazorEngineHost engineHost)
         {
             engineHost.NamespaceImports.Add("System");
             engineHost.NamespaceImports.Add("System.IO");
@@ -118,32 +162,35 @@
                 {
                     foreach (var n in namespaces)
                     {
-                        engineHost.NamespaceImports.Add(n);
+                        if (!string.IsNullOrWhiteSpace(n))
+                        {
+                            engineHost.NamespaceImports.Add(n);
+                        }
                     }
                 }
             }
-
-            return new RazorTemplateEngine(engineHost);
         }
 
-        private Func<NancyRazorViewBase> GetCompiledViewFactory(string extension, TextReader reader, Assembly referencingAssembly, Type passedModelType, ViewLocationResult viewLocationResult)
+        private Func<INancyRazorView> GetCompiledViewFactory(string extension, TextReader reader, Assembly referencingAssembly, Type passedModelType, ViewLocationResult viewLocationResult)
         {
             var renderer = this.viewRenderers.First(x => x.Extension.Equals(extension, StringComparison.OrdinalIgnoreCase));
 
-            var engine = this.GetRazorTemplateEngine(renderer.Host);
+            var engine = new RazorTemplateEngine(renderer.Host);
 
-            var razorResult = engine.GenerateCode(reader, sourceFileName:"placeholder");
+            var razorResult = engine.GenerateCode(reader, null, null, "roo");
 
-            var viewFactory = this.GenerateRazorViewFactory(renderer.Provider, razorResult, referencingAssembly, renderer.Assemblies, passedModelType, viewLocationResult);
+            var viewFactory = this.GenerateRazorViewFactory(renderer, razorResult, referencingAssembly, passedModelType, viewLocationResult);
 
             return viewFactory;
         }
 
-        private Func<NancyRazorViewBase> GenerateRazorViewFactory(CodeDomProvider codeProvider, GeneratorResults razorResult, Assembly referencingAssembly, IEnumerable<string> rendererSpecificAssemblies, Type passedModelType, ViewLocationResult viewLocationResult)
+        private Func<INancyRazorView> GenerateRazorViewFactory(IRazorViewRenderer viewRenderer, GeneratorResults razorResult, Assembly referencingAssembly, Type passedModelType, ViewLocationResult viewLocationResult)
         {
-            var outputAssemblyName = Path.Combine(Path.GetTempPath(), String.Format("Temp_{0}.dll", Guid.NewGuid().ToString("N")));
+            var outputAssemblyName = 
+                Path.Combine(Path.GetTempPath(), String.Format("Temp_{0}.dll", Guid.NewGuid().ToString("N")));
 
-            var modelType = FindModelType(razorResult.Document, passedModelType);
+            var modelType = 
+                FindModelType(razorResult.Document, passedModelType, viewRenderer.ModelCodeGenerator);
 
             var assemblies = new List<string>
             {
@@ -153,15 +200,13 @@
                 GetAssemblyPath(modelType)
             };
 
+            assemblies.AddRange(AppDomainAssemblyTypeScanner.Assemblies.Select(GetAssemblyPath));
+
             if (referencingAssembly != null)
             {
                 assemblies.Add(GetAssemblyPath(referencingAssembly));
             }
-
-            assemblies = assemblies
-                .Union(rendererSpecificAssemblies)
-                .ToList();
-
+            
             if (this.razorConfiguration != null)
             {
                 var assemblyNames = this.razorConfiguration.GetAssemblyNames();
@@ -176,24 +221,40 @@
                 }
             }
 
-            var compilerParameters = new CompilerParameters(assemblies.ToArray(), outputAssemblyName);
+            assemblies = assemblies
+                .Union(viewRenderer.Assemblies)
+                .ToList();
 
-            var results = codeProvider.CompileAssemblyFromDom(compilerParameters, razorResult.GeneratedCode);
-            
+            var compilerParameters = 
+                new CompilerParameters(assemblies.ToArray(), outputAssemblyName);
+
+            CompilerResults results;
+            lock (this.compileLock)
+            {
+                results = viewRenderer.Provider.CompileAssemblyFromDom(compilerParameters, razorResult.GeneratedCode);
+            }
+
             if (results.Errors.HasErrors)
             {
+                var output = new string[results.Output.Count];
+                results.Output.CopyTo(output, 0);
+
                 var fullTemplateName = viewLocationResult.Location + "/" + viewLocationResult.Name + "." + viewLocationResult.Extension;
                 var templateLines = GetViewBodyLines(viewLocationResult);
                 var errors = results.Errors.OfType<CompilerError>().Where(ce => !ce.IsWarning).ToArray();
                 var errorMessages = BuildErrorMessages(errors);
+                var compilationSource = this.GetCompilationSource(viewRenderer.Provider, razorResult.GeneratedCode);
 
                 MarkErrorLines(errors, templateLines);
 
+                var lineNumber = 1;
+
                 var errorDetails = string.Format(
-                                        "Error compiling template: <strong>{0}</strong><br/><br/>Errors:<br/>{1}<br/><br/>Details:<br/>{2}",
+                                        "Error compiling template: <strong>{0}</strong><br/><br/>Errors:<br/>{1}<br/><br/>Details:<br/>{2}<br/><br/>Compilation Source:<br/><pre><code>{3}</code></pre>",
                                         fullTemplateName,
                                         errorMessages,
-                                        templateLines.Aggregate((s1, s2) => s1 + "<br/>" + s2));
+                                        templateLines.Aggregate((s1, s2) => s1 + "<br/>" + s2), 
+                                        compilationSource.Aggregate((s1, s2) => s1 + "<br/>Line " + lineNumber++ + ":\t" + s2));
 
                 return () => new NancyRazorErrorView(errorDetails);
             }
@@ -212,22 +273,35 @@
                 return () => new NancyRazorErrorView(error);
             }
 
-            if (Activator.CreateInstance(type) as NancyRazorViewBase == null)
+            if (Activator.CreateInstance(type) as INancyRazorView == null)
             {
-                const string error = "Could not construct RazorOutput.Template or it does not inherit from RazorViewBase";
+                const string error = "Could not construct RazorOutput.Template or it does not inherit from INancyRazorView";
                 return () => new NancyRazorErrorView(error);
             }
 
-            return () => (NancyRazorViewBase)Activator.CreateInstance(type);
+            return () => (INancyRazorView)Activator.CreateInstance(type);
+        }
+
+        private string[] GetCompilationSource(CodeDomProvider provider, CodeCompileUnit generatedCode)
+        {
+            var compilationSourceBuilder = new StringBuilder();
+            using (var writer = new IndentedTextWriter(new StringWriter(compilationSourceBuilder), "\t"))
+            {
+                provider.GenerateCodeFromCompileUnit(generatedCode, writer, new CodeGeneratorOptions());
+            }
+
+            var compilationSource = compilationSourceBuilder.ToString();
+            return HttpUtility.HtmlEncode(compilationSource)
+                .Split(new[] { Environment.NewLine }, StringSplitOptions.None);
         }
 
         private static string BuildErrorMessages(IEnumerable<CompilerError> errors)
         {
             return errors.Select(error => String.Format(
-                "[{0}] Line: {1} Column: {2} - {3} (<a class='LineLink' href='#{1}'>show</a>)", 
-                error.ErrorNumber, 
-                error.Line, 
-                error.Column, 
+                "[{0}] Line: {1} Column: {2} - {3} (<a class='LineLink' href='#{1}'>show</a>)",
+                error.ErrorNumber,
+                error.Line,
+                error.Column,
                 error.ErrorText)).Aggregate((s1, s2) => s1 + "<br/>" + s2);
         }
 
@@ -236,7 +310,7 @@
             foreach (var compilerError in errors)
             {
                 var lineIndex = compilerError.Line - 1;
-                if (lineIndex <= templateLines.Count - 1)
+                if ((lineIndex <= templateLines.Count - 1) && (lineIndex >= 0))
                 {
                     templateLines[lineIndex] = string.Format("<span class='error'><a name='{0}' />{1}</span>", compilerError.Line, templateLines[lineIndex]);
                 }
@@ -259,60 +333,96 @@
             return templateLines.ToArray();
         }
 
-        private static Type FindModelType(Block block, Type passedModelType)
+        /// <summary>
+        /// Tries to find the model type from the document
+        /// So documents using @model will actually be able to reference the model type
+        /// </summary>
+        /// <param name="block">The document</param>
+        /// <param name="passedModelType">The model type from the base class</param>
+        /// <param name="modelCodeGenerator">The model code generator</param>
+        /// <returns>The model type, if discovered, or the passedModelType if not</returns>
+        private static Type FindModelType(Block block, Type passedModelType, Type modelCodeGenerator)
         {
-            var modelFinder = new ModelFinder();
-            block.Accept(modelFinder);
+            var modelBlock =
+                block.Flatten().FirstOrDefault(b => b.CodeGenerator.GetType() == modelCodeGenerator);
 
-            if (string.IsNullOrWhiteSpace(modelFinder.ModelTypeName))
+            if (modelBlock == null)
             {
                 return passedModelType ?? typeof(object);
             }
 
-            Type modelType;
-
-            if (passedModelType != null)
+            if (string.IsNullOrEmpty(modelBlock.Content))
             {
-                modelType = passedModelType;
-                while (modelType != null)
+                return passedModelType ?? typeof(object);
+            }
+
+            var discoveredModelType = modelBlock.Content.Trim();
+
+            var modelType = Type.GetType(discoveredModelType);
+
+            if (modelType != null)
+            {
+                return modelType;
+            }
+
+            modelType = AppDomainAssemblyTypeScanner.Types.FirstOrDefault(t => t.FullName == discoveredModelType);
+
+            if (modelType != null)
+            {
+                return modelType;
+            }
+
+            modelType = AppDomainAssemblyTypeScanner.Types.FirstOrDefault(t => t.Name == discoveredModelType);
+
+            if (modelType != null)
+            {
+                return modelType;
+            }
+
+            throw new NotSupportedException(string.Format(
+                                                "Unable to discover CLR Type for model by the name of {0}.\n\nTry using a fully qualified type name and ensure that the assembly is added to the configuration file.\n\nAppDomain Assemblies:\n\t{1}.\n\nCurrent ADATS assemblies:\n\t{2}.\n\nAssemblies in directories\n\t{3}", 
+                                                discoveredModelType,
+                                                AppDomain.CurrentDomain.GetAssemblies().Select(a => a.FullName).Aggregate((n1, n2) => n1 + "\n\t" + n2),
+                                                AppDomainAssemblyTypeScanner.Assemblies.Select(a => a.FullName).Aggregate((n1, n2) => n1 + "\n\t" + n2),
+                                                GetAssembliesInDirectories().Aggregate((n1, n2) => n1 + "\n\t" + n2)));
+        }
+
+        private static IEnumerable<String> GetAssembliesInDirectories()
+        {
+            return GetAssemblyDirectories().SelectMany(d => Directory.GetFiles(d, "*.dll"));
+        }
+
+        /// <summary>
+        /// Returns the directories containing dll files. It uses the default convention as stated by microsoft.
+        /// </summary>
+        /// <see cref="http://msdn.microsoft.com/en-us/library/system.appdomainsetup.privatebinpathprobe.aspx"/>
+        private static IEnumerable<string> GetAssemblyDirectories()
+        {
+            var privateBinPathDirectories = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath == null
+                                                ? new string[] { }
+                                                : AppDomain.CurrentDomain.SetupInformation.PrivateBinPath.Split(';');
+
+            foreach (var privateBinPathDirectory in privateBinPathDirectories)
+            {
+                if (!string.IsNullOrWhiteSpace(privateBinPathDirectory))
                 {
-                    if (modelType.FullName == modelFinder.ModelTypeName || modelType.Name == modelFinder.ModelTypeName)
-                    {
-                        return modelType;
-                    }
-
-                    modelType = modelType.BaseType;
+                    yield return privateBinPathDirectory;
                 }
-
-                throw new NotSupportedException(string.Format("Unable to discover CLR Type for model by the name of {0}.  Ensure that the model passed to the view is assignable to the model declared in the view.", modelFinder.ModelTypeName));
             }
 
-            modelType = Type.GetType(modelFinder.ModelTypeName);
-
-            if (modelType != null)
+            if (AppDomain.CurrentDomain.SetupInformation.PrivateBinPathProbe == null)
             {
-                return modelType;
+                yield return AppDomain.CurrentDomain.SetupInformation.ApplicationBase;
             }
-
-            modelType = AppDomainAssemblyTypeScanner.Types.Where(t => t.FullName == modelFinder.ModelTypeName).FirstOrDefault();
-
-            if (modelType != null)
-            {
-                return modelType;
-            }
-
-            modelType = AppDomainAssemblyTypeScanner.Types.Where(t => t.Name == modelFinder.ModelTypeName).FirstOrDefault();
-
-            if (modelType != null)
-            {
-                return modelType;
-            }
-
-            throw new NotSupportedException(string.Format("Unable to discover CLR Type for model by the name of {0}. Try using a fully qualified type name and ensure that the assembly is added to the configuration file.", modelFinder.ModelTypeName));
         }
 
         private static void AddModelNamespace(GeneratorResults razorResult, Type modelType)
         {
+            if (string.IsNullOrWhiteSpace(modelType.Namespace))
+            {
+                return;
+            }
+
             if (razorResult.GeneratedCode.Namespaces[0].Imports.OfType<CodeNamespaceImport>().Any(x => x.Namespace == modelType.Namespace))
             {
                 return;
@@ -331,7 +441,7 @@
             return new Uri(assembly.EscapedCodeBase).LocalPath;
         }
 
-        private NancyRazorViewBase GetOrCompileView(ViewLocationResult viewLocationResult, IRenderContext renderContext, Assembly referencingAssembly, Type passedModelType)
+        private INancyRazorView GetOrCompileView(ViewLocationResult viewLocationResult, IRenderContext renderContext, Assembly referencingAssembly, Type passedModelType)
         {
             var viewFactory = renderContext.ViewCache.GetOrAdd(
                 viewLocationResult,
@@ -339,21 +449,35 @@
 
             var view = viewFactory.Invoke();
 
-            view.Code = string.Empty;
-
             return view;
         }
 
-        private NancyRazorViewBase GetViewInstance(ViewLocationResult viewLocationResult, IRenderContext renderContext, Assembly referencingAssembly, dynamic model)
+        private INancyRazorView GetViewInstance(ViewLocationResult viewLocationResult, IRenderContext renderContext, Assembly referencingAssembly, dynamic model)
         {
-            var modelType = (model == null) ? null :  model.GetType();
+            var modelType = (model == null) ? typeof(object) : model.GetType();
 
-            var view = 
+            var view =
                 this.GetOrCompileView(viewLocationResult, renderContext, referencingAssembly, modelType);
 
             view.Initialize(this, renderContext, model);
 
             return view;
+        }
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        public void Dispose()
+        {
+            if (this.viewRenderers == null)
+            {
+                return;
+            }
+
+            foreach (var disposable in this.viewRenderers.OfType<IDisposable>())
+            {
+                disposable.Dispose();
+            }
         }
     }
 }

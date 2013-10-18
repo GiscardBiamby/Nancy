@@ -17,18 +17,18 @@
         /// <summary>
         /// User-configured root namespaces for assemblies.
         /// </summary>
-        public static IDictionary<Assembly, string> RootNamespaces = new Dictionary<Assembly, string>();
+        public readonly static IDictionary<Assembly, string> RootNamespaces = new Dictionary<Assembly, string>();
         
         /// <summary>
         /// A list of assemblies to ignore when scanning for embedded views.
         /// </summary>
-        public static IList<Assembly> Ignore = new List<Assembly>();
+        public readonly static IList<Assembly> Ignore = new List<Assembly>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ResourceViewLocationProvider"/> class.
         /// </summary>
         public ResourceViewLocationProvider()
-            : this(new DefaultResourceReader(), new DefaultResourceAssemblyProvider())
+            : this(new DefaultResourceReader(), new ResourceAssemblyProvider())
         {
         }
 
@@ -62,6 +62,21 @@
                 .SelectMany(x => GetViewLocations(x, supportedViewExtensions));
         }
 
+        /// <summary>
+        /// Returns an <see cref="ViewLocationResult"/> instance for all the views matching the viewName that could be located by the provider.
+        /// </summary>
+        /// <param name="supportedViewExtensions">An <see cref="IEnumerable{T}"/> instance, containing the view engine file extensions that is supported by the running instance of Nancy.</param>
+        /// <param name="viewName">The name of the view to try and find</param>
+        /// <returns>An <see cref="IEnumerable{T}"/> instance, containing <see cref="ViewLocationResult"/> instances for the located views.</returns>
+        /// <remarks>If no views could be located, this method should return an empty enumerable, never <see langword="null"/>.</remarks>
+        public IEnumerable<ViewLocationResult> GetLocatedViews(IEnumerable<string> supportedViewExtensions, string location, string viewName)
+        {
+            var allResults = this.GetLocatedViews(supportedViewExtensions);
+
+            return allResults.Where(vlr => vlr.Location.Equals(location, StringComparison.OrdinalIgnoreCase) &&
+                                           vlr.Name.Equals(viewName, StringComparison.OrdinalIgnoreCase));
+        }
+
         private IEnumerable<ViewLocationResult> GetViewLocations(Assembly assembly, IEnumerable<string> supportedViewExtensions)
         {
             var resourceStreams = 
@@ -80,11 +95,13 @@
                 throw new InvalidOperationException(errorMessage);
             }
 
-            var commonNamespace = RootNamespaces.ContainsKey(assembly) ?
-                RootNamespaces[assembly] : 
-                ExtractAssemblyRootNamespace(assembly);
+            string commonNamespace;
+            if (!RootNamespaces.TryGetValue(assembly, out commonNamespace))
+            {
+                commonNamespace = ExtractAssemblyRootNamespace(assembly);
+            }
 
-            if (string.IsNullOrEmpty(commonNamespace))
+            if (string.IsNullOrWhiteSpace(commonNamespace))
             {
                 return Enumerable.Empty<ViewLocationResult>();
             }
@@ -155,7 +172,8 @@
 
         private static string GetResourceExtension(string resourceName)
         {
-            return Path.GetExtension(resourceName).Substring(1);
+            var extension = Path.GetExtension(resourceName);
+            return extension != null ? extension.Substring(1) : string.Empty;
         }
     }
 }

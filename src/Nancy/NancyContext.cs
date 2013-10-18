@@ -1,12 +1,15 @@
-using Nancy.Responses.Negotiation;
-using Nancy.Security;
 
 namespace Nancy
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
-    using Diagnostics;
+    using Nancy.Diagnostics;
+    using Nancy.Responses.Negotiation;
+    using Nancy.Routing;
+    using Nancy.Security;
+    using Nancy.Validation;
+    using System.Globalization;
 
     /// <summary>
     /// Nancy context.
@@ -14,6 +17,8 @@ namespace Nancy
     public sealed class NancyContext : IDisposable
     {
         private Request request;
+
+        private ModelValidationResult modelValidationResult;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="NancyContext"/> class.
@@ -32,6 +37,11 @@ namespace Nancy
         /// Gets the dictionary for storage of per-request items. Disposable items will be disposed when the context is.
         /// </summary>
         public IDictionary<string, object> Items { get; private set; }
+
+        /// <summary>
+        /// Gets or sets the resolved route 
+        /// </summary>
+        public Route ResolvedRoute { get; set; }
 
         /// <summary>
         /// Gets or sets the parameters for the resolved route 
@@ -69,7 +79,7 @@ namespace Nancy
         /// <summary>
         /// Diagnostic request tracing
         /// </summary>
-        public RequestTrace Trace { get; private set; }
+        public RequestTrace Trace { get; set; }
 
         /// <summary>
         /// Gets a value indicating whether control panel access is enabled for this request
@@ -80,6 +90,20 @@ namespace Nancy
         /// Non-model specific data for rendering in the response
         /// </summary>
         public dynamic ViewBag { get; private set; }
+
+        /// <summary>
+        /// Gets or sets the model validation result.
+        /// </summary>
+        public ModelValidationResult ModelValidationResult
+        {
+            get { return this.modelValidationResult ?? new ModelValidationResult(null); }
+            set { this.modelValidationResult = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the context's culture
+        /// </summary>
+        public CultureInfo Culture { get; set; }
 
         /// <summary>
         /// Context of content negotiation (if relevent)
@@ -101,6 +125,11 @@ namespace Nancy
             if (this.request != null)
             {
                 ((IDisposable) this.request).Dispose();
+            }
+
+            if (this.Response != null)
+            {
+                this.Response.Dispose();
             }
         }
     }

@@ -1,7 +1,9 @@
 ﻿namespace Nancy
 {
     using System;
+    using System.ComponentModel;
     using System.Dynamic;
+    using System.Globalization;
     using System.Linq.Expressions;
     using Microsoft.CSharp.RuntimeBinder;
 
@@ -34,6 +36,85 @@
         public object Value
         {
             get { return this.value; }
+        }
+
+        /// <summary>
+        /// Returns a default value if Value is null
+        /// </summary>
+        /// <typeparam name="T">When no default value is supplied, required to supply the default type</typeparam>
+        /// <param name="defaultValue">Optional parameter for default value, if not given it returns default of type T</param>
+        /// <returns>If value is not null, value is returned, else default value is returned</returns>
+        public T Default<T>(T defaultValue = default(T))
+        {
+            if (this.HasValue)
+            {
+                try
+                {
+                    return (T)value;
+                }
+                catch
+                {
+                    var typeName = value.GetType().Name;
+                    var message = string.Format("Cannot convert value of type '{0}' to type '{1}'",
+                                                typeName, typeof(T).Name);
+
+                    throw new InvalidCastException(message);
+                }
+            }
+
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Attempts to convert the value to type of T, failing to do so will return the defaultValue. 
+        /// </summary>
+        /// <typeparam name="T">When no default value is supplied, required to supply the default type</typeparam>
+        /// <param name="defaultValue">Optional parameter for default value, if not given it returns default of type T</param>
+        /// <returns>If value is not null, value is returned, else default value is returned</returns>
+        public T TryParse<T>(T defaultValue = default (T))
+        {
+            if (this.HasValue)
+            {
+                try
+                {
+                    if (value.GetType().IsAssignableFrom(typeof(T)))
+                    {
+                        return (T)value;
+                    }
+
+                    var TType = typeof (T);
+
+                    var stringValue = value as string;
+                    if (TType == typeof (DateTime))
+                    {
+                        DateTime result;
+
+                        if (DateTime.TryParse(stringValue, CultureInfo.InvariantCulture, DateTimeStyles.None, out result))
+                        {
+                            return (T)((object)result);
+                        }
+                    }
+                    else if (stringValue != null)
+                    {
+                        var converter = TypeDescriptor.GetConverter(TType);
+
+                        if (converter.IsValid(stringValue))
+                        {
+                            return (T) converter.ConvertFromInvariantString(stringValue);
+                        }
+                    }
+                    else if (TType == typeof (string))
+                    {
+                        return (T)Convert.ChangeType(value, TypeCode.String, CultureInfo.InvariantCulture);
+                    }
+                }
+                catch
+                {
+                    return defaultValue;
+                }
+            }
+
+            return defaultValue;
         }
 
         public static bool operator ==(DynamicDictionaryValue dynamicValue, object compareValue)
@@ -174,9 +255,17 @@
 
                 var typeCode = Type.GetTypeCode(binderType);
 
-                if (typeCode == TypeCode.Object) // something went wrong here
+                if (typeCode == TypeCode.Object)
                 {
-                    return false;
+                    if (binderType.IsAssignableFrom(value.GetType()))
+                    {
+                        result = value;
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
                 }
 
                 result = Convert.ChangeType(value, typeCode);

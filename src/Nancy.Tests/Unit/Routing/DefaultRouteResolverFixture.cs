@@ -1,617 +1,291 @@
 ﻿namespace Nancy.Tests.Unit.Routing
 {
-    using System;
-    using FakeItEasy;
-    using Nancy.Bootstrapper;
-    using Nancy.Routing;
-    using Nancy.Tests.Fakes;
-
+    using Nancy.Testing;
     using Xunit;
 
     public class DefaultRouteResolverFixture
     {
-        private readonly IRoutePatternMatcher matcher;
-        private readonly INancyModuleCatalog catalog;
-        private readonly Func<dynamic, Response> expectedAction;
-        private readonly INancyModuleBuilder moduleBuilder;
-        private readonly INancyContextFactory contextFactory;
-        private readonly IModuleKeyGenerator moduleKeyGenerator;
-        private FakeNancyModule expectedModule;
+        private readonly Browser browser;
 
         public DefaultRouteResolverFixture()
         {
-            this.moduleBuilder = A.Fake<INancyModuleBuilder>();
-            A.CallTo(() => this.moduleBuilder.BuildModule(A<NancyModule>.Ignored, A<NancyContext>.Ignored)).
-                ReturnsLazily(r => r.Arguments[0] as NancyModule);
+            this.browser = new Browser(with => with.Module<TestModule>());
+        }
 
-            this.catalog = A.Fake<INancyModuleCatalog>();
-            A.CallTo(() => this.catalog.GetModuleByKey(A<string>.Ignored, A<NancyContext>.Ignored)).Returns(expectedModule);
+        [Fact]
+        public void Should_resolve_root()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/");
 
-            this.expectedAction = x => HttpStatusCode.OK;
-            this.expectedModule = new FakeNancyModule(x => x.AddGetRoute("/foo/bar", this.expectedAction));
+            // Then
+            result.Body.AsString().ShouldEqual("Root");
+        }
 
-            A.CallTo(() => this.catalog.GetModuleByKey(A<string>.Ignored, A<NancyContext>.Ignored)).ReturnsLazily(() => this.expectedModule);
+        [Fact]
+        public void Should_resolve_correct_route_based_on_method()
+        {
+            // Given
+            // When
+            var result = this.browser.Post("/");
 
-            this.matcher = A.Fake<IRoutePatternMatcher>();
-            A.CallTo(() => this.matcher.Match(A<string>.Ignored, A<string>.Ignored, A<NancyContext>.Ignored)).ReturnsLazily(x =>
-                new FakeRoutePatternMatchResult(c =>
+            // Then
+            result.Body.AsString().ShouldEqual("PostRoot");
+        }
+
+        [Fact]
+        public void Should_resolve_single_literal()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/foo");
+
+            // Then
+            result.Body.AsString().ShouldEqual("SingleLiteral");
+        }
+
+        [Fact]
+        public void Should_resolve_multi_literal()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/foo/bar/baz");
+
+            // Then
+            result.Body.AsString().ShouldEqual("MultipleLiteral");
+        }
+
+        [Fact]
+        public void Should_resolve_single_capture()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/foo/testing/plop");
+
+            // Then
+            result.Body.AsString().ShouldEqual("Captured testing");
+        }
+
+        [Fact]
+        public void Should_resolve_optional_capture_with_optional_specified()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/moo/hoo/moo");
+
+            // Then
+            result.Body.AsString().ShouldEqual("OptionalCapture hoo");
+        }
+
+        [Fact]
+        public void Should_resolve_optional_capture_with_optional_not_specified()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/moo/moo");
+
+            // Then
+            result.Body.AsString().ShouldEqual("OptionalCapture default");
+        }
+
+        [Fact]
+        public void Should_resolve_optional_capture_with_default_with_optional_specified()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/boo/badger/laa");
+
+            // Then
+            result.Body.AsString().ShouldEqual("OptionalCaptureWithDefault badger");
+        }
+
+        [Fact]
+        public void Should_resolve_optional_capture_with_default_with_optional_not_specified()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/boo/laa");
+
+            // Then
+            result.Body.AsString().ShouldEqual("OptionalCaptureWithDefault test");
+        }
+
+        [Fact]
+        public void Should_capture_greedy_on_end()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/bleh/this/is/some/stuff");
+
+            // Then
+            result.Body.AsString().ShouldEqual("GreedyOnEnd this/is/some/stuff");
+        }
+
+        [Fact]
+        public void Should_capture_greedy_in_middle()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/bleh/this/is/some/stuff/bar");
+
+            // Then
+            result.Body.AsString().ShouldEqual("GreedyInMiddle this/is/some/stuff");
+        }
+
+        [Fact]
+        public void Should_capture_greedy_and_normal_capture()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/greedy/this/is/some/stuff/badger/blah");
+
+            // Then
+            result.Body.AsString().ShouldEqual("GreedyAndCapture this/is/some/stuff blah");
+        }
+
+        [Fact]
+        public void Should_capture_regex()
+        {
+            // Given
+            // When
+            var result = this.browser.Get("/regex/123/moo");
+
+            // Then
+            result.Body.AsString().ShouldEqual("RegEx 123 moo");
+        }
+
+        [Fact]
+        public void Should_handle_head_requests()
+        {
+            // Given
+            // When
+            var result = this.browser.Head("/");
+
+            // Then
+            result.StatusCode.ShouldEqual(HttpStatusCode.OK);
+            result.Body.AsString().ShouldEqual(string.Empty);
+        }
+
+        [Fact]
+        public void Should_handle_options_requests()
+        {
+            // Given
+            // When
+            var result = this.browser.Options("/");
+
+            // Then
+            result.StatusCode.ShouldEqual(HttpStatusCode.OK);
+            result.Headers["Allow"].ShouldContain("GET");
+            result.Headers["Allow"].ShouldContain("POST");
+        }
+
+        [Fact]
+        public void Should_return_404_if_no_root_found_when_requesting_it()
+        {
+            // Given
+            var localBrowser = new Browser(with => with.Module<NoRootModule>());
+
+            // When
+            var result = localBrowser.Get("/");
+
+            // Then
+            result.StatusCode.ShouldEqual(HttpStatusCode.NotFound);
+        }
+
+        [Fact]
+        public void Should_return_405_if_requested_method_is_not_permitted_but_others_are_available_and_not_disabled()
+        {
+            // Given
+            StaticConfiguration.DisableMethodNotAllowedResponses = false;
+            var localBrowser = new Browser(with => with.Module<MethodNotAllowedModule>());
+
+            // When
+            var result = localBrowser.Get("/");
+
+            // Then
+            result.StatusCode.ShouldEqual(HttpStatusCode.MethodNotAllowed);
+        }
+
+        [Fact]
+        public void Should_not_return_405_if_requested_method_is_not_permitted_but_others_are_available_and_disabled()
+        {
+            // Given
+            StaticConfiguration.DisableMethodNotAllowedResponses = true;
+            var localBrowser = new Browser(with => with.Module<MethodNotAllowedModule>());
+
+            // When
+            var result = localBrowser.Get("/");
+
+            // Then
+            result.StatusCode.ShouldEqual(HttpStatusCode.NotFound);
+        }
+
+        [Fact]
+        public void Should_set_allowed_method_on_response_when_returning_405()
+        {
+            // Given
+            StaticConfiguration.DisableMethodNotAllowedResponses = false;
+            var localBrowser = new Browser(with => with.Module<MethodNotAllowedModule>());
+            
+            // When
+            var result = localBrowser.Get("/");
+
+            // Then
+            result.Headers["Allow"].ShouldEqual("DELETE, POST");
+        }
+
+        private class MethodNotAllowedModule : NancyModule
+        {
+            public MethodNotAllowedModule()
+            {
+                Delete["/"] = x => 200;
+                
+                Post["/"] = x => 200;
+            }
+        }
+
+        private class NoRootModule : NancyModule
+        {
+            public NoRootModule()
+            {
+                Get["/notroot"] = _ => "foo";
+            }        
+        }
+
+        private class TestModule : NancyModule
+        {
+            public TestModule()
+            {
+                Get["/"] = _ => "Root";
+
+                Post["/"] = _ => "PostRoot";
+
+                Get["/foo"] = _ => "SingleLiteral";
+
+                Get["/foo/bar/baz"] = _ => "MultipleLiteral";
+
+                Get["/foo/{bar}/plop"] = _ => "Captured " + _.bar;
+
+                Get["/moo/baa"] = _ => "Dummy";
+
+                Get["/moo/baa/cheese"] = _ => "Dummy";
+
+                Get["/moo/{test?}/moo"] = _ => "OptionalCapture " + _.test.Default("default");
+
+                Get["/boo/{woo?test}/laa"] = _ => "OptionalCaptureWithDefault " + _.woo;
+
+                Get["/bleh/{test*}"] = _ => "GreedyOnEnd " + _.test;
+
+                Get["/bleh/{test*}/bar"] = _ => "GreedyInMiddle " + _.test;
+
+                Get["/greedy/{test*}/badger/{woo}"] = _ => "GreedyAndCapture " + _.test + " " + _.woo;
+
+                Get[@"/regex/(?<foo>\d{2,4})/{bar}"] = x =>
                 {
-                    c.IsMatch(((string)x.Arguments[0]).Equals(((string)x.Arguments[1])));
-                    c.AddParameter("foo", "bar");
-                }));
-
-            this.contextFactory = A.Fake<INancyContextFactory>();
-            this.moduleKeyGenerator = A.Fake<IModuleKeyGenerator>();
-            A.CallTo(() => moduleKeyGenerator.GetKeyForModuleType(A<Type>._)).ReturnsLazily(x => (string) x.Arguments[0]);
-        }
-
-        private DefaultRouteResolver CreateResolver(Action<FakeRouteCache.FakeRouteCacheConfigurator> closure)
-        {
-            var cache = 
-                new FakeRouteCache(closure);
-
-            return CreateResolver(cache);
-        }
-
-        private DefaultRouteResolver CreateResolver(IRouteCache cache)
-        {
-            return new DefaultRouteResolver(this.catalog, this.matcher, this.moduleBuilder, cache, null);
-        }
-
-        [Fact]
-        public void Should_set_parameters_on_resolved_route_to_parameteres_that_was_matched()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext {Request = request};
-            
-            var resolver = 
-                CreateResolver(x => x.AddGetRoute("/foo/bar", "module-key"));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeOfType<NotFoundRoute>();
-            resolvedRoute.ShouldNotBeOfType<MethodNotAllowedRoute>();
-            ((string)resolvedRoute.Item2["foo"]).ShouldEqual("bar");
-        }
-
-        [Fact]
-        public void Should_set_action_on_resolved_route()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext { Request = request };
-
-            var resolver =
-                CreateResolver(x => x.AddGetRoute("/foo/bar", "module-key"));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context).Item1;
-
-            // Then
-            resolvedRoute.ShouldNotBeOfType<NotFoundRoute>();
-            resolvedRoute.ShouldNotBeOfType<MethodNotAllowedRoute>();
-            resolvedRoute.Action.ShouldBeSameAs(this.expectedAction);
-        }
-
-        [Fact]
-        public void Should_return_first_route_with_when_multiple_matches_are_available_and_contains_same_number_of_parameter_captures()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext { Request = request };
-
-            var resolver = CreateResolver(x => {
-                x.AddGetRoute("/foo/{bar}", "first-module-key-parameters");
-                x.AddGetRoute("/foo/{bar}", "second-module-key-parameters");
-            });
-
-            this.expectedModule = new FakeNancyModule(x => x.AddGetRoute("/foo/{bar}", this.expectedAction));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("bar", "fake value")));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.catalog.GetModuleByKey("first-module-key-parameters", context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_return_route_with_most_parameter_captures_when_multiple_matches_with_parameters_are_available()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar/foo");
-            var context = new NancyContext { Request = request };
-
-            var resolver = CreateResolver(x => {
-                x.AddGetRoute("/foo/{bar}/{foo}", "module-key-two-parameters");
-                x.AddGetRoute("/foo/{bar}", "module-key-one-parameter");
-            });
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}", null)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("bar", "fake value")));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}/{foo}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true)
-                    .AddParameter("foo", "fake value")
-                    .AddParameter("bar", "fake value 2")));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.catalog.GetModuleByKey("module-key-two-parameters", context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_return_the_first_route_that_is_an_exact_match_over_any_other()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext { Request = request };
-
-            var resolver = CreateResolver(x =>
-            {
-                x.AddGetRoute("/foo/{bar}", "module-key-parameters");
-                x.AddGetRoute("/{foo}/{bar}", "module-key-two-parameters");
-                x.AddGetRoute("/foo/bar", "module-key-no-parameters");
-                x.AddGetRoute("/foo/bar", "module-key-no-parameters-second");
-                x.AddGetRoute("/foo/{bar}", "module-key-parameters");
-                x.AddGetRoute("/{foo}/{bar}", "module-key-two-parameters");
-            });
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/bar", null)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true)));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}", null)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("bar", "fake value")));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}", null)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true)
-                    .AddParameter("foo", "fake value")
-                    .AddParameter("bar", "fake value")));
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.catalog.GetModuleByKey("module-key-no-parameters", context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_return_the_route_with_the_most_specific_path_matches()
-        {
-            // The most specific path match is the one with the most matching segments (delimited by '/') and the
-            // least parameter captures (i.e. the most exact matching segments)
-            // Given
-            var request = new FakeRequest("get", "/foo/bar/me");
-            var context = new NancyContext { Request = request };
-            
-            var resolver = CreateResolver(x =>
-            {
-                x.AddGetRoute("/foo/{bar}", "module-key-first");
-                x.AddGetRoute("/foo/{bar}/{two}", "module-key-third");
-                x.AddGetRoute("/foo/bar/{two}", "module-key-second");
-                x.AddGetRoute("/foo/{bar}/{two}", "module-key-third");
-            });
-
-            this.expectedModule = new FakeNancyModule(x => x.AddGetRoute("/foo/bar/{two}", this.expectedAction));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/bar/{two}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("two", "fake values")));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}/{two}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true)
-                    .AddParameter("bar", "fake values")
-                    .AddParameter("two", "fake values")));
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/foo/{bar}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("bar", "fake value")));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.catalog.GetModuleByKey("module-key-second", context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_choose_root_route_over_one_with_capture_if_requesting_root_uri()
-        {
-            var request = new FakeRequest("get", "/");
-            var context = new NancyContext { Request = request };
-            
-            var resolver = CreateResolver(x => {
-                x.AddGetRoute("/{name}", "module-key-second");
-                x.AddGetRoute("/", "module-key-first");
-                x.AddGetRoute("/{name}", "module-key-second");
-            });
-
-            A.CallTo(() => this.matcher.Match(request.Path, "/", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true)));
-            A.CallTo(() => this.matcher.Match(request.Path, "/{name}", A<NancyContext>.Ignored)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(true).AddParameter("name", "fake values")));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.catalog.GetModuleByKey("module-key-first", context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_invoke_pattern_matcher_with_request_uri()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext {Request = request};
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.matcher.Match(request.Path, A<string>.Ignored, A<NancyContext>.Ignored)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_invoke_pattern_matcher_with_context()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.matcher.Match(A<string>.Ignored, A<string>.Ignored, context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_invoke_pattern_matcher_for_all_entries_in_route_cache()
-        {
-            // Given
-            var request = new FakeRequest("get", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            
-            var resolver = CreateResolver(x => {
-                x.AddGetRoute("/foo/bar");
-                x.AddGetRoute("/bar/foo");
-                x.AddGetRoute("/foobar");
-            });
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.matcher.Match(A<string>.Ignored, "/foo/bar", A<NancyContext>.Ignored)).MustHaveHappened();
-            A.CallTo(() => this.matcher.Match(A<string>.Ignored, "/bar/foo", A<NancyContext>.Ignored)).MustHaveHappened();
-            A.CallTo(() => this.matcher.Match(A<string>.Ignored, "/foobar", A<NancyContext>.Ignored)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_ignore_method_casing_when_resolving_routes()
-        {
-            // Given
-            var request = new FakeRequest("GeT", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeNull();
-            resolvedRoute.ShouldNotBeOfType<NotFoundRoute>();
-            resolvedRoute.ShouldNotBeOfType<MethodNotAllowedRoute>();
-        }
-
-        [Fact]
-        public void Should_return_methodnotallowedroute_with_path_set_to_request_uri_when_matched_route_was_for_wrong_request_method()
-        {
-            // Given
-            var request = new FakeRequest("POST", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            var route = resolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldNotBeNull();
-            route.ShouldBeOfType<MethodNotAllowedRoute>();
-            route.Description.Path.ShouldEqual(request.Path);
-        }
-
-        [Fact]
-        public void Should_return_methodnotallowedroute_with_allow_header_set_to_allowed_methods_matching_request_route()
-        {
-            // Given
-            var request = new FakeRequest("POST", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            
-            var resolver = CreateResolver(x => {
-                x.AddGetRoute("/foo/bar");
-                x.AddPutRoute("/foo/bar");
-            });
-
-            // When
-            var route = resolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldNotBeNull();
-            route.ShouldBeOfType<MethodNotAllowedRoute>();
-            ((Response)route.Invoke(new DynamicDictionary())).Headers["Allow"].ShouldEqual("GET, PUT");
-        }
-
-        [Fact]
-        public void Should_invoke_module_builder_with_context_and_resolved_module()
-        {
-            // Given
-            var request = new FakeRequest("GET", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            resolver.Resolve(context);
-
-            // Then
-            A.CallTo(() => this.moduleBuilder.BuildModule(this.expectedModule, context)).MustHaveHappened();
-        }
-
-        [Fact]
-        public void Should_return_route_with_module_returned_by_module_builder()
-        {
-            // Given
-            var request = new FakeRequest("GET", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            var moduleReturnedByBuilder = new FakeNancyModule(x => x.AddGetRoute("/bar/foo"));
-            A.CallTo(() => this.moduleBuilder.BuildModule(A<NancyModule>.Ignored, A<NancyContext>.Ignored)).Returns(
-                moduleReturnedByBuilder);
-
-            // When
-            var route = resolver.Resolve(context);
-
-            // Then
-            route.Item1.Description.Path.ShouldEqual("/bar/foo");
-        }
-
-        [Fact]
-        public void Should_return_route_with_path_set_to_request_uri_when_single_route_could_be_resolved()
-        {
-            // Given
-            var request = new FakeRequest("GET", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeOfType<NotFoundRoute>();
-            resolvedRoute.Item1.Description.Path.ShouldEqual(request.Path);
-        }
-
-        [Fact]
-        public void should_return_notfoundroute_with_path_set_to_request_uri_when_route_cache_is_empty()
-        {
-            // Given
-            var request = new FakeRequest("GET", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(FakeRouteCache.Empty);
-
-            // When
-            var resolvedRoute = resolver.Resolve(context).Item1;
-
-            // Then
-            resolvedRoute.ShouldBeOfType<NotFoundRoute>();
-            resolvedRoute.Description.Path.ShouldEqual(request.Path);
-        }
-
-        [Fact]
-        public void Should_return_notfoundroute_with_path_set_to_request_uri_when_route_could_not_be_resolved()
-        {
-            // Given
-            var request = new FakeRequest("GET", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/bar/foo"));
-
-            A.CallTo(() => this.matcher.Match("/foo/bar", "/bar/foo", null)).Returns(
-                new FakeRoutePatternMatchResult(x => x.IsMatch(false)));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context).Item1;
-
-            // Then
-            resolvedRoute.ShouldBeOfType<NotFoundRoute>();
-            resolvedRoute.Description.Path.ShouldEqual(request.Path);
-        }
-
-        [Fact]
-        public void Should_allow_head_request_when_route_is_defined_for_get()
-        {
-            // Given
-            var request = new FakeRequest("HEAD", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/bar/foo"));
-
-            // When
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeNull();
-            resolvedRoute.ShouldNotBeOfType<NotFoundRoute>();
-            resolvedRoute.ShouldNotBeOfType<MethodNotAllowedRoute>();
-        }
-
-        [Fact]
-        public void Should_allow_options_request_when_route_is_defined()
-        {
-            // Given
-            var request = new FakeRequest("OPTIONS", "/foo/bar");
-            var context = new NancyContext {Request = request};
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When 
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeNull();
-            resolvedRoute.Item1.ShouldBeOfType<OptionsRoute>();
-        }
-
-        [Fact]
-        public void Should_have_status_code_200_for_options_when_route_is_defined()
-        {
-          // Given
-          var request = new FakeRequest("OPTIONS", "/foo/bar");
-          var context = new NancyContext { Request = request };
-          var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-          // When 
-          var resolvedRoute = resolver.Resolve(context);
-          var response = (Response)resolvedRoute.Item1.Invoke(null);
-
-          // Then
-          response.StatusCode.ShouldEqual(HttpStatusCode.OK);
-        }
-
-        [Fact]
-        public void Should_return_options_route_with_path_set_to_request_route_for_options()
-        {
-            // Given
-            var request = new FakeRequest("OPTIONS", "/foo/bar");
-            var context = new NancyContext { Request = request };
-            var resolver = CreateResolver(x => x.AddGetRoute("/foo/bar"));
-
-            // When 
-            var resolvedRoute = resolver.Resolve(context);
-
-            // Then
-            resolvedRoute.ShouldNotBeNull();
-            resolvedRoute.Item1.ShouldBeOfType<OptionsRoute>();
-            resolvedRoute.Item1.Description.Path.ShouldEqual(request.Path);
-        }
-
-        [Fact]
-        public void Should_return_optionsroute_with_allow_header_set_to_allowed_methods_matching_request_route_for_options()
-        {
-            // Given
-            var request = new FakeRequest("OPTIONS", "/foo/bar");
-            var context = new NancyContext {Request = request};
-            var resolver = CreateResolver(x =>
-            {
-                x.AddGetRoute("/foo/bar");
-                x.AddPutRoute("/foo/bar");
-            });
-
-            // When
-            var route = resolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldNotBeNull();
-            route.ShouldBeOfType<OptionsRoute>();
-            ((Response)route.Invoke(new DynamicDictionary())).Headers["Allow"].ShouldEqual("GET, PUT");
-        }
-
-        [Fact]
-        public void Should_return_user_defined_route_for_route_with_custom_options_defined()
-        {
-            // Given
-            var request = new FakeRequest("OPTIONS", "/foo/bar");
-            var context = new NancyContext {Request = request};
-            var resolver = CreateResolver(x =>
-            {
-                x.AddGetRoute("/foo/bar");
-                x.AddOptionsRoute("/foo/bar");
-            });
-
-            // When
-            var route = resolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldNotBeNull();
-            route.ShouldNotBeOfType<OptionsRoute>();
-        }
-
-        [Fact]
-        public void Should_not_return_a_route_if_matching_and_the_filter_returns_false()
-        {
-            // Given
-            var moduleCatalog = new FakeModuleCatalog();
-            var routeCache = new RouteCache(moduleCatalog, new FakeModuleKeyGenerator(), A.Fake<INancyContextFactory>());
-            var specificResolver = new DefaultRouteResolver(moduleCatalog, this.matcher, this.moduleBuilder, routeCache, null);
-            var request = new FakeRequest("GET", "/filtered");
-            var context = new NancyContext { Request = request };
-
-            // When
-            var route = specificResolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldBeOfType(typeof(NotFoundRoute));
-        }
-
-        [Fact]
-        public void Should_return_a_route_if_matching_and_the_filter_returns_true()
-        {
-            // Given
-            var moduleCatalog = new FakeModuleCatalog();
-            var routeCache = new RouteCache(moduleCatalog, new FakeModuleKeyGenerator(), A.Fake<INancyContextFactory>());
-            var specificResolver = new DefaultRouteResolver(moduleCatalog, this.matcher, this.moduleBuilder, routeCache, null);
-            var request = new FakeRequest("GET", "/notfiltered");
-            var context = new NancyContext { Request = request };
-
-            // When
-            var route = specificResolver.Resolve(context).Item1;
-
-            // Then
-            route.ShouldBeOfType(typeof(Route));
-        }
-
-        [Fact]
-        public void Should_return_route_whos_filter_returns_true_when_there_is_also_a_matching_route_with_a_failing_filter()
-        {
-            // Given
-            var moduleCatalog = new FakeModuleCatalog();
-            var routeCache = new RouteCache(moduleCatalog, new FakeModuleKeyGenerator(), A.Fake<INancyContextFactory>());
-            var specificResolver = new DefaultRouteResolver(moduleCatalog, this.matcher, this.moduleBuilder, routeCache, null);
-            var request = new FakeRequest("GET", "/filt");
-            var context = new NancyContext { Request = request };
-
-            // When
-            var route = specificResolver.Resolve(context).Item1;
-
-            // Then
-            route.Description.Condition(context).ShouldBeTrue();
-        }
-
-        [Fact]
-        public void Should_return_prereq_and_postreq_from_module()
-        {
-            // Given
-            var moduleCatalog = A.Fake<INancyModuleCatalog>();
-            A.CallTo(() => moduleCatalog.GetAllModules(A<NancyContext>.Ignored)).Returns(new[] { new FakeNancyModuleWithPreAndPostHooks() });
-            A.CallTo(() => moduleCatalog.GetModuleByKey(A<string>.Ignored, A<NancyContext>.Ignored)).Returns(
-                new FakeNancyModuleWithPreAndPostHooks());
-
-            var routeCache = new RouteCache(moduleCatalog, new FakeModuleKeyGenerator(), A.Fake<INancyContextFactory>());
-            var specificResolver = new DefaultRouteResolver(moduleCatalog, this.matcher, this.moduleBuilder, routeCache, null);
-            var request = new FakeRequest("GET", "/PrePost");
-            var context = new NancyContext { Request = request };
-
-            // When
-            var result = specificResolver.Resolve(context);
-
-            // Then
-            result.Item3.ShouldNotBeNull();
-            result.Item4.ShouldNotBeNull();
+                    return string.Format("RegEx {0} {1}", x.foo, x.bar);
+                };
+            }
         }
     }
 }

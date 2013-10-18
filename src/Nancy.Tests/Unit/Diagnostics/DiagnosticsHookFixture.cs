@@ -22,13 +22,15 @@
             this.objectSerializer = new DefaultObjectSerializer();
         }
 
+#if DEBUG
         [Fact]
         public void Should_return_info_page_if_password_null()
         {
             // Given
             var diagsConfig = new DiagnosticsConfiguration { Password = null, CryptographyConfiguration = this.cryptoConfig };
 
-            var bootstrapper = new ConfigurableBootstrapper(with =>{
+            var bootstrapper = new ConfigurableBootstrapper(with =>
+            {
                 with.EnableAutoRegistration();
                 with.DiagnosticsConfiguration(diagsConfig);
                 with.Diagnostics<DefaultDiagnostics>();
@@ -37,7 +39,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy");
+            var result = browser.Get(diagsConfig.Path);
 
             // Then
             Assert.True(result.Body.AsString().Contains("Diagnostics Disabled"));
@@ -59,11 +61,12 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy");
+            var result = browser.Get(diagsConfig.Path);
 
             // Then
             Assert.True(result.Body.AsString().Contains("Diagnostics Disabled"));
         }
+#endif
 
         [Fact]
         public void Should_return_login_page_with_no_auth_cookie()
@@ -81,7 +84,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy");
+            var result = browser.Get(diagsConfig.Path);
 
             // Then
             result.Body["#login"].ShouldExistOnce();
@@ -103,7 +106,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy", with =>
+            var result = browser.Get(diagsConfig.Path, with =>
                 {
                     with.Cookie(DiagsCookieName, this.GetSessionCookieValue("password"));
                 });
@@ -128,7 +131,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy", with =>
+            var result = browser.Get(diagsConfig.Path, with =>
             {
                 with.Cookie(DiagsCookieName, this.GetSessionCookieValue("password", DateTime.Now.AddMinutes(-10)));
             });
@@ -153,7 +156,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Get("/_Nancy", with =>
+            var result = browser.Get(diagsConfig.Path, with =>
             {
                 with.Cookie(DiagsCookieName, this.GetSessionCookieValue("wrongPassword"));
             });
@@ -178,7 +181,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Post("/_Nancy", with =>
+            var result = browser.Post(diagsConfig.Path, with =>
             {
                 with.FormValue("Password", "wrongpassword");
             });
@@ -204,7 +207,7 @@
             var browser = new Browser(bootstrapper);
 
             // When
-            var result = browser.Post("/_Nancy/", with =>
+            var result = browser.Post(diagsConfig.Path, with =>
             {
                 with.FormValue("Password", "password");
             });
@@ -231,7 +234,8 @@
             var expiryDate = DateTime.Now.AddMinutes(5);
 
             // When
-            var result = browser.Get("/_Nancy", with =>{
+            var result = browser.Get(diagsConfig.Path, with =>
+            {
                 with.Cookie(DiagsCookieName, this.GetSessionCookieValue("password", expiryDate));
             });
 
@@ -239,6 +243,32 @@
             result.Cookies.Any(c => c.Name == DiagsCookieName).ShouldBeTrue();
             this.DecodeCookie(result.Cookies.First(c => c.Name == DiagsCookieName))
                 .Expiry.ShouldNotEqual(expiryDate);
+        }
+
+        [Fact]
+        public void Should_return_diagnostic_example()
+        {
+            // Given no custom interactive diagnostic providers
+            var diagsConfig = new DiagnosticsConfiguration { Password = "password", CryptographyConfiguration = this.cryptoConfig };
+
+            var bootstrapper = new ConfigurableBootstrapper(with =>
+            {
+                with.EnableAutoRegistration();
+                with.DiagnosticsConfiguration(diagsConfig);
+                with.Diagnostics<DefaultDiagnostics>();
+            });
+
+            var browser = new Browser(bootstrapper);
+
+            // When querying the list of interactive providers
+            var result = browser.Get(diagsConfig.Path + "/interactive/providers/", with =>
+                {
+                    with.Cookie(DiagsCookieName, this.GetSessionCookieValue("password"));
+                });
+
+            // Then we should see the fake testing provider and not the Nancy provided testing example
+            result.Body.AsString().ShouldNotContain("Fake testing provider");
+            result.Body.AsString().Contains("Testing Diagnostic Provider");
         }
 
         private string GetSessionCookieValue(string password, DateTime? expiry = null)
@@ -267,7 +297,7 @@
             var hmacStringLength = Base64Helpers.GetBase64Length(this.cryptoConfig.HmacProvider.HmacLength);
             var encryptedSession = cookieValue.Substring(hmacStringLength);
             var decrypted = this.cryptoConfig.EncryptionProvider.Decrypt(encryptedSession);
-            
+
             return this.objectSerializer.Deserialize(decrypted) as DiagnosticsSession;
         }
     }

@@ -1,10 +1,10 @@
 ﻿namespace Nancy.Authentication.Basic
 {
     using System;
-using System.Text;
-using Nancy.Bootstrapper;
+    using System.Text;
+    using Nancy.Bootstrapper;
     using Nancy.Extensions;
-using Nancy.Security;
+    using Nancy.Security;
 
     /// <summary>
     /// Nancy basic authentication implementation
@@ -39,7 +39,7 @@ using Nancy.Security;
         /// </summary>
         /// <param name="module">Module to add handlers to (usually "this")</param>
         /// <param name="configuration">Forms authentication configuration</param>
-        public static void Enable(NancyModule module, BasicAuthenticationConfiguration configuration)
+        public static void Enable(INancyModule module, BasicAuthenticationConfiguration configuration)
         {
             if (module == null)
             {
@@ -89,7 +89,7 @@ using Nancy.Security;
 
         private static void RetrieveCredentials(NancyContext context, BasicAuthenticationConfiguration configuration)
         {
-            var credentials = 
+            var credentials =
                 ExtractCredentialsFromHeaders(context.Request);
 
             if (credentials != null && credentials.Length == 2)
@@ -123,7 +123,7 @@ using Nancy.Security;
                 var encodedUserPass = authorization.Substring(SCHEME.Length).Trim();
                 var userPass = Encoding.UTF8.GetString(Convert.FromBase64String(encodedUserPass));
 
-                return String.IsNullOrWhiteSpace(userPass) ? null : userPass.Split(':');
+                return String.IsNullOrWhiteSpace(userPass) ? null : userPass.Split(new[] {':'}, 2);
             }
             catch (FormatException)
             {

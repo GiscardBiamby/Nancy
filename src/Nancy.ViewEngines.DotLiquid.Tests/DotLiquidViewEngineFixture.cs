@@ -4,6 +4,7 @@
     using System.IO;
     using FakeItEasy;
     using global::DotLiquid;
+    using global::DotLiquid.NamingConventions;
     using Nancy.Tests;
     using Xunit;
     using System.Collections.Generic;
@@ -13,11 +14,13 @@
         private readonly IRenderContext renderContext;
         private readonly IFileSystemFactory factory;
         private readonly DotLiquidViewEngine engine;
+        private readonly DotLiquidViewEngine engineCSharp;
 
         public DotLiquidViewEngineFixture()
         {
             this.factory = A.Fake<IFileSystemFactory>();
-            this.engine = new DotLiquidViewEngine(this.factory);
+            this.engine = new DotLiquidViewEngine(this.factory, new RubyNamingConvention());
+            this.engineCSharp = new DotLiquidViewEngine(this.factory, new CSharpNamingConvention());
 
             var cache = A.Fake<IViewCache>();
             A.CallTo(() => cache.GetOrAdd(A<ViewLocationResult>.Ignored, A<Func<ViewLocationResult, Template>>.Ignored))
@@ -38,12 +41,12 @@
         {
             // Given
             var context = CreateContext();
-            
+
             // When
             this.engine.Initialize(context);
 
             // Then
-            A.CallTo(() => factory.GetFileSystem(context)).MustHaveHappened();
+            A.CallTo(() => factory.GetFileSystem(context, A<IEnumerable<string>>._)).MustHaveHappened();
         }
 
         [Fact]
@@ -69,10 +72,114 @@
                 () => new StringReader(@"{% assign name = 'test' %}<h1>Hello Mr. {{ name }}</h1>")
             );
 
-            var currentStartupContext = 
-                CreateContext(new [] {location});
+            var currentStartupContext =
+                CreateContext(new[] { location });
 
             this.engine.Initialize(currentStartupContext);
+
+            var stream = new MemoryStream();
+
+            // When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("<h1>Hello Mr. test</h1>");
+        }
+
+        [Fact]
+        public void RenderView_with_uppercase_filter_should_return_uppercase_string()
+        {
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"{% assign name = 'Test' %}<h1>Hello Mr. {{ name | upcase }}</h1>")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engine.Initialize(currentStartupContext);
+
+            var stream = new MemoryStream();
+
+            // When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("<h1>Hello Mr. TEST</h1>");
+        }
+
+        [Fact]
+        public void RenderView_with_lowercase_filter_should_return_lowercase_string()
+        {
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"{% assign name = 'Test' %}<h1>Hello Mr. {{ name | downcase }}</h1>")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engine.Initialize(currentStartupContext);
+
+            var stream = new MemoryStream();
+
+            // When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("<h1>Hello Mr. test</h1>");
+        }
+
+        [Fact]
+        public void RenderView_with_uppercase_filter_should_return_uppercase_string_using_csharp_convention()
+        {
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"{% assign name = 'Test' %}<h1>Hello Mr. {{ name | Upcase }}</h1>")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engineCSharp.Initialize(currentStartupContext);
+
+            var stream = new MemoryStream();
+
+            // When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("<h1>Hello Mr. TEST</h1>");
+        }
+
+        [Fact]
+        public void RenderView_with_lowercase_filter_should_return_lowercase_string_using_csharp_convention()
+        {
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"{% assign name = 'Test' %}<h1>Hello Mr. {{ name | Downcase }}</h1>")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engineCSharp.Initialize(currentStartupContext);
 
             var stream = new MemoryStream();
 
@@ -92,11 +199,11 @@
                 string.Empty,
                 string.Empty,
                 "liquid",
-                () => new StringReader(@"<h1>Hello Mr. {{ model.name }}</h1>")
+                () => new StringReader(@"<h1>Hello Mr. {{ Model.name }}</h1>")
             );
 
-            var currentStartupContext = 
-                CreateContext(new [] {location});
+            var currentStartupContext =
+                CreateContext(new[] { location });
 
             this.engine.Initialize(currentStartupContext);
 
@@ -118,11 +225,11 @@
                 string.Empty,
                 string.Empty,
                 "liquid",
-                () => new StringReader(@"<h1>Hello Mr. {{ model.name }}</h1>")
+                () => new StringReader(@"<h1>Hello Mr. {{ Model.name }}</h1>")
             );
 
-            var currentStartupContext = 
-                CreateContext(new [] {location});
+            var currentStartupContext =
+                CreateContext(new[] { location });
 
             this.engine.Initialize(currentStartupContext);
             var stream = new MemoryStream();
@@ -143,7 +250,7 @@
                 string.Empty,
                 string.Empty,
                 "liquid",
-                () => new StringReader(@"<h1>Hello Mr. {{ viewbag.name }}</h1>")
+                () => new StringReader(@"<h1>Hello Mr. {{ ViewBag.Name }}</h1>")
             );
 
             var currentStartupContext =
@@ -169,12 +276,12 @@
                 string.Empty,
                 string.Empty,
                 "liquid",
-                () => new StringReader(@"<h1>Hello Mr. {{ model.name }}</h1>")
+                () => new StringReader(@"<h1>Hello Mr. {{ Model.name }}</h1>")
             );
 
-            var currentStartupContext = 
-                CreateContext(new [] {location});
-            
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
             this.engine.Initialize(currentStartupContext);
             var stream = new MemoryStream();
 
@@ -186,60 +293,124 @@
             stream.ShouldEqual("<h1>Hello Mr. </h1>");
         }
 
-#if !__MonoCS__
         [Fact]
-        public void RenderView_should_accept_a_model_with_a_list_and_iterate_over_it()
+        public void Syntax_errors_should_return_500()
         {
-            // TODO - Fixup on Mono
             // Given
             var location = new ViewLocationResult(
                 string.Empty,
                 string.Empty,
                 "liquid",
-                () => new StringReader(@"<ul>{% for item in model.Widgets %}<li>{{ item.name }}</li>{% endfor %}</ul>")
+                () => new StringReader(@"{% if true %}{% end %}")
             );
 
-            var currentStartupContext = 
-                CreateContext(new [] {location});
-            
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
             this.engine.Initialize(currentStartupContext);
             var stream = new MemoryStream();
 
             // When
-            var widgets = new List<object> { new { name = "Widget 1" }, new { name = "Widget 2" }, new { name = "Widget 3" }, new { name = "Widget 4" } };
-            var response = this.engine.RenderView(location, new { Widgets = widgets }, this.renderContext);
+            var response = this.engine.RenderView(location, null, this.renderContext);
             response.Contents.Invoke(stream);
 
             // Then
-            stream.ShouldEqual("<ul><li>Widget 1</li><li>Widget 2</li><li>Widget 3</li><li>Widget 4</li></ul>");
+            response.StatusCode.ShouldEqual(HttpStatusCode.InternalServerError);
         }
-#endif
+
+        [Fact]
+        public void When_rendering_model_inheriting_drop_should_preserve_camel_case()
+        {
+            // Writing the test name in snake_case is slightly ironic, no?
+
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"{{ Model.CamelCase }}")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engine.Initialize(currentStartupContext);
+            var stream = new MemoryStream();
+
+            // When
+            var dropModel = new DropModel() { CamelCase = "Hello Jamie!" };
+            var response = this.engine.RenderView(location, dropModel, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("Hello Jamie!");
+        }
+
+        [Fact]
+        public void RenderView_should_accept_a_model_with_a_list_and_iterate_over_it()
+        {
+            // Given
+            var location = new ViewLocationResult(
+                string.Empty,
+                string.Empty,
+                "liquid",
+                () => new StringReader(@"<ul>{% for item in Model.Items %}<li>{{ item.Name }}</li>{% endfor %}</ul>")
+            );
+
+            var currentStartupContext =
+                CreateContext(new[] { location });
+
+            this.engine.Initialize(currentStartupContext);
+            var stream = new MemoryStream();
+
+            // Construct the model for the View
+            IList<Article> articles = new List<Article>() {
+                new Article() {Name = "Hello"},
+                new Article() {Name = "Jamie!"},
+                new Article() {Name = "You're fun!"}
+            };
+
+            Magazine menu = new Magazine() { Items = articles };
+
+            // When
+            var response = this.engine.RenderView(location, menu, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            stream.ShouldEqual("<ul><li>Hello</li><li>Jamie!</li><li>You're fun!</li></ul>");
+        }
 
         private ViewEngineStartupContext CreateContext(params ViewLocationResult[] results)
         {
-            return new ViewEngineStartupContext(
-                this.renderContext.ViewCache,
-                results,
-                new [] {"liquid"});
+            var viewLocationProvider = A.Fake<IViewLocationProvider>();
+            A.CallTo(() => viewLocationProvider.GetLocatedViews(A<IEnumerable<string>>._))
+                                               .Returns(results);
+
+            var viewEngine = A.Fake<IViewEngine>();
+            A.CallTo(() => viewEngine.Extensions).Returns(new[] { "liquid" });
+
+            var viewLocator = new DefaultViewLocator(viewLocationProvider, new[] { viewEngine });
+
+            var startupContext = new ViewEngineStartupContext(
+                null,
+                viewLocator);
+
+            return startupContext;
         }
     }
-	
-    public class Menu
+
+    public class Magazine
     {
-        public int Id { get; set; }
-        public string Text { get; set; }
-        public IList<MenuItem> Items { get; set; }
+        public IList<Article> Items { get; set; }
     }
 
-    public class MenuItem
+    public class Article : Drop
     {
-        public int Id { get; set; }
-        public string Controller { get; set; }
-        public string Action { get; set; }
+        public string Name { get; set; }
     }
-    public class Article
+
+    public class DropModel : Drop
     {
-        public int Id { get; set; }
-        public string Body { get; set; }
+        public string CamelCase { get; set; }
     }
 }

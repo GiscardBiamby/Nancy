@@ -1,16 +1,21 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Xml.Serialization;
-
 namespace Nancy.ModelBinding.DefaultBodyDeserializers
 {
+    using System;
+    using System.IO;
+    using System.Xml.Serialization;
+
+    /// <summary>
+    /// Deserializes request bodies in XML format
+    /// </summary>
     public class XmlBodyDeserializer : IBodyDeserializer
     {
-        public bool CanDeserialize(string contentType)
+        /// <summary>
+        /// Whether the deserializer can deserialize the content type
+        /// </summary>
+        /// <param name="contentType">Content type to deserialize</param>
+        /// <param name="context">Current <see cref="BindingContext"/>.</param>
+        /// <returns>True if supported, false otherwise</returns>
+        public bool CanDeserialize(string contentType, BindingContext context)
         {
             if (String.IsNullOrEmpty(contentType))
             {
@@ -25,17 +30,16 @@ namespace Nancy.ModelBinding.DefaultBodyDeserializers
                    contentMimeType.EndsWith("+xml", StringComparison.InvariantCultureIgnoreCase));
         }
 
+        /// <summary>
+        /// Deserialize the request body to a model
+        /// </summary>
+        /// <param name="contentType">Content type to deserialize</param>
+        /// <param name="bodyStream">Request body stream</param>
+        /// <param name="context">Current <see cref="BindingContext"/>.</param>
+        /// <returns>Model instance</returns>
         public object Deserialize(string contentType, Stream bodyStream, BindingContext context)
         {
-            var attributeOverrides = new XmlAttributeOverrides();
-            var propertiesToIgnore = context.DestinationType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                                                    .Except(context.ValidModelProperties);
-            foreach (var validModelProperty in propertiesToIgnore)
-            {
-                attributeOverrides.Add(context.DestinationType, validModelProperty.Name, new XmlAttributes{XmlIgnore = true});
-            }
-
-            var ser = new XmlSerializer(context.DestinationType, attributeOverrides);
+            var ser = new XmlSerializer(context.DestinationType);
             return ser.Deserialize(bodyStream);
         }
     }

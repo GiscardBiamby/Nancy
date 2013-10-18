@@ -91,7 +91,7 @@
         {
             // Given
             var availableMembers =
-                typeof(ConfigurableBootstrapper.ConfigurableBoostrapperConfigurator)
+                typeof(ConfigurableBootstrapper.ConfigurableBootstrapperConfigurator)
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .Select(x => x.Name)
                 .Distinct();
@@ -131,14 +131,18 @@
         public void Should_run_application_startup_closure()
         {
             var date = new DateTime(2112,10,31);
-            var bootstrapper = new ConfigurableBootstrapper(with => with.ApplicationStartup((container, pipelines) =>
+
+            var bootstrapper = new ConfigurableBootstrapper(with => 
+            {
+                with.ApplicationStartup((container, pipelines) =>
                 {
                     pipelines.BeforeRequest += ctx =>
                         {
                             ctx.Items.Add("date", date);
                             return null;
                         };
-                }));
+                });
+            });
 
             bootstrapper.Initialise();
 
@@ -200,6 +204,11 @@
             }
 
             public void HandleRequest(Request request, Action<NancyContext> onComplete, Action<Exception> onError)
+            {
+                throw new NotImplementedException();
+            }
+
+            public void HandleRequest(Request request, Func<NancyContext, NancyContext> preRequest, Action<NancyContext> onComplete, Action<Exception> onError)
             {
                 throw new NotImplementedException();
             }

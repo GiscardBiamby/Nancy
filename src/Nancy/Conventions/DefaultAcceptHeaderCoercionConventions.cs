@@ -15,7 +15,7 @@
 
         public Tuple<bool, string> Validate(NancyConventions conventions)
         {
-            if (conventions.StaticContentsConventions == null)
+            if (conventions.AcceptHeaderCoercionConventions == null)
             {
                 return Tuple.Create(false, "The accept header coercion conventions cannot be null.");
             }
@@ -27,7 +27,6 @@
         {
             conventions.AcceptHeaderCoercionConventions = new List<Func<IEnumerable<Tuple<string, decimal>>, NancyContext, IEnumerable<Tuple<string, decimal>>>>(2)
                                                               {
-                                                                  BuiltInAcceptHeaderCoercions.CoerceStupidBrowsers, 
                                                                   BuiltInAcceptHeaderCoercions.BoostHtml,
                                                                   BuiltInAcceptHeaderCoercions.CoerceBlankAcceptHeader,
                                                               };

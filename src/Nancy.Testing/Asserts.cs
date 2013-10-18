@@ -11,9 +11,9 @@
     {
         public static void Contains<T>(T expected, IEnumerable<T> actual, IEqualityComparer<T> comparer = null)
         {
-            comparer = 
+            comparer =
                 comparer ?? new AssertEqualityComparer<T>();
-            
+
             if (actual != null)
             {
                 if (actual.Any(value => comparer.Equals(expected, value)))
@@ -39,6 +39,14 @@
                 new AssertEqualityComparer<T>();
 
             if (!comparer.Equals(actual, expected))
+            {
+                throw new AssertException(string.Format("The expected value '{0}' was not equal to the actual value '{1}'.", expected, actual));
+            }
+        }
+
+        public static void Equal(string expected, string actual, StringComparison comparisonType = StringComparison.InvariantCulture)
+        {
+            if (!String.Equals(expected, actual, comparisonType))
             {
                 throw new AssertException(string.Format("The expected value '{0}' was not equal to the actual value '{1}'.", expected, actual));
             }
@@ -84,15 +92,39 @@
             if (values == null)
             {
                 throw new AssertException("The collection was null.");
-               
             }
-            
-            if(values.Count() != 1)
+
+            if (values.Count() == 0)
             {
-                throw new AssertException("The collection contained more than one values.");
+                throw new AssertException("The collection contained no values.");
+            }
+
+            if (values.Count() > 1)
+            {
+                throw new AssertException("The collection contained more than one value.");
             }
 
             return values.First();
+        }
+
+        public static IEnumerable<T> Exactly<T>(IEnumerable<T> values, int numberOfOccurrances)
+        {
+            if (values == null)
+            {
+                throw new AssertException("The collection was null.");
+            }
+
+            var elements = values.Count();
+            if (elements != numberOfOccurrances)
+            {
+                var message =
+                    string.Format(
+                        "The collection didn't exactly contain the expected number of occurances.\nActual: {0}\nExpected: {1}",
+                        elements, numberOfOccurrances);
+                throw new AssertException(message);
+            }
+
+            return values;
         }
 
         public static void True(bool condition)

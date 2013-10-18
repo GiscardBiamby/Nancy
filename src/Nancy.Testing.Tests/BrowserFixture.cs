@@ -47,6 +47,23 @@ namespace Nancy.Testing.Tests
         }
 
         [Fact]
+        public void Should_be_able_to_set_user_host_address()
+        {
+            // Given
+            const string userHostAddress = "127.0.0.1";
+
+            // When
+            var result = browser.Get("/userHostAddress", with =>
+                                                         {
+                                                             with.HttpRequest();
+                                                             with.UserHostAddress(userHostAddress);
+                                                         });
+
+            // Then
+            result.Body.AsString().ShouldEqual(userHostAddress);
+        }
+
+        [Fact]
         public void Should_be_able_to_send_stream_in_body()
         {
             // Given
@@ -80,6 +97,27 @@ namespace Nancy.Testing.Tests
 
             // Then
             var actualModel = result.Body.DeserializeJson<EchoModel>();
+
+            actualModel.ShouldNotBeNull();
+            actualModel.SomeString.ShouldEqual(model.SomeString);
+            actualModel.SomeInt.ShouldEqual(model.SomeInt);
+            actualModel.SomeBoolean.ShouldEqual(model.SomeBoolean);
+        }
+
+        [Fact]
+        public void Should_be_able_to_send_xml_in_body()
+        {
+            // Given
+            var model = new EchoModel { SomeString = "Some String", SomeInt = 29, SomeBoolean = true };
+
+            // When
+            var result = browser.Post("/", with =>
+            {
+                with.XMLBody(model);
+            });
+
+            // Then
+            var actualModel = result.Body.DeserializeXml<EchoModel>();
 
             actualModel.ShouldNotBeNull();
             actualModel.SomeString.ShouldEqual(model.SomeString);
@@ -314,7 +352,7 @@ namespace Nancy.Testing.Tests
 
                 Post["/"] = ctx =>
                     {
-                        var body = new StreamReader(Context.Request.Body).ReadToEnd();
+                        var body = new StreamReader(this.Context.Request.Body).ReadToEnd();
                         return new Response
                                 {
                                     Contents = stream =>
@@ -330,7 +368,7 @@ namespace Nancy.Testing.Tests
                 {
                     var response = (Response)"Cookies";
 
-                    foreach (var cookie in Request.Cookies)
+                    foreach (var cookie in this.Request.Cookies)
                     {
                         response.AddCookie(cookie.Key, cookie.Value);
                     }
@@ -339,6 +377,8 @@ namespace Nancy.Testing.Tests
                 };
 
                 Get["/nothing"] = ctx => string.Empty;
+
+                Get["/userHostAddress"] = ctx => this.Request.UserHostAddress;
 
                 Get["/session"] = ctx =>
                     {
@@ -356,7 +396,7 @@ namespace Nancy.Testing.Tests
                         return response;
                     };
 
-                Get["/type"] = _ => Request.Url.Scheme.ToLower();
+                Get["/type"] = _ => this.Request.Url.Scheme.ToLower();
 
                 Get["/ajax"] = _ => this.Request.IsAjaxRequest() ? "ajax" : "not-ajax";
             }

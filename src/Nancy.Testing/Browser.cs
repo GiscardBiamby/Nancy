@@ -24,7 +24,7 @@ namespace Nancy.Testing
         /// provided <see cref="ConfigurableBootstrapper"/> configuration.
         /// </summary>
         /// <param name="action">The <see cref="ConfigurableBootstrapper"/> configuration that should be used by the bootstrapper.</param>
-        public Browser(Action<ConfigurableBootstrapper.ConfigurableBoostrapperConfigurator> action)
+        public Browser(Action<ConfigurableBootstrapper.ConfigurableBootstrapperConfigurator> action)
             : this(new ConfigurableBootstrapper(action))
         {
         }
@@ -32,7 +32,7 @@ namespace Nancy.Testing
         /// <summary>
         /// Initializes a new instance of the <see cref="Browser"/> class.
         /// </summary>
-        /// <param name="bootstrapper">A <see cref="INancyBootstrapper"/> instance that determins the Nancy configuration that should be used by the browser.</param>
+        /// <param name="bootstrapper">A <see cref="INancyBootstrapper"/> instance that determines the Nancy configuration that should be used by the browser.</param>
         public Browser(INancyBootstrapper bootstrapper)
         {
             this.bootstrapper = bootstrapper;
@@ -202,7 +202,7 @@ namespace Nancy.Testing
             var requestStream =
                 RequestStream.FromStream(contextValues.Body, 0, true);
 
-            return new Request(method, path, contextValues.Headers, requestStream, contextValues.Protocol, contextValues.QueryString);
+            return new Request(method, path, contextValues.Headers, requestStream, contextValues.Protocol, contextValues.QueryString, contextValues.UserHostAddress);
         }
     }
 }
